@@ -152,6 +152,7 @@ mod event;
 mod event_stream;
 mod section_list_cache;
 mod id;
+mod member_log;
 mod message_filter;
 mod messages;
 mod node;
