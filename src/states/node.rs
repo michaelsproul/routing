@@ -207,7 +207,7 @@ impl Node {
             is_first_node: first_node,
             is_approved: first_node,
             msg_queue: VecDeque::new(),
-            peer_mgr: PeerManager::new(min_section_size, public_id),
+            peer_mgr: PeerManager::new(first_node, min_section_size, public_id),
             response_cache: cache,
             routing_msg_filter: RoutingMessageFilter::new(),
             sig_accumulator: Default::default(),
