@@ -1889,34 +1889,33 @@ impl Node {
     // Context: a node is joining our section. Sends `AcceptAsCandidate` to our section. If the
     // network is unbalanced, sends `ExpectCandidate` on to a section with a shorter prefix.
     fn handle_expect_candidate(&mut self,
-                               mut candidate_id: PublicId,
+                               candidate_id: PublicId,
                                client_auth: Authority<XorName>,
                                message_id: MessageId)
                                -> Result<(), RoutingError> {
+        if candidate_id == *self.full_id.public_id() {
+            // If we're the joining node: stop
+            return Ok(());
+        }
+
         for peer_id in self.peer_mgr.remove_expired_candidates() {
             self.disconnect_peer(&peer_id);
         }
 
-        let original_name = *candidate_id.name();
-        let relocated_name = self.next_node_name.take().unwrap_or_else(|| {
-            self.peer_mgr.routing_table().assign_to_min_len_prefix(&original_name)
-        });
-        candidate_id.set_name(relocated_name);
-
         if self.peer_mgr.routing_table().should_join_our_section(candidate_id.name()).is_err() {
+            let relocated_name =
+                self.peer_mgr.routing_table().assign_to_min_len_prefix(candidate_id.name());
+            let mut new_candidate_id = candidate_id;
+            new_candidate_id.set_name(relocated_name);
+
             let request_content = MessageContent::ExpectCandidate {
-                expect_id: candidate_id,
+                expect_id: new_candidate_id,
                 client_auth: client_auth,
                 message_id: message_id,
             };
-            let src = Authority::Section(original_name);
-            let dst = Authority::Section(*candidate_id.name());
+            let src = Authority::Section(*candidate_id.name());
+            let dst = Authority::Section(*new_candidate_id.name());
             return self.send_routing_message(src, dst, request_content);
-        }
-
-        if candidate_id == *self.full_id.public_id() {
-            // If we're the joining node: stop
-            return Ok(());
         }
 
         self.peer_mgr.expect_candidate(*candidate_id.name(), client_auth)?;
