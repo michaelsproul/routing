@@ -170,6 +170,7 @@ mod types;
 mod utils;
 mod xor_name;
 mod sha3;
+mod sorted_vec;
 
 /// Mock crust
 #[cfg(feature = "use-mock-crust")]
@@ -207,6 +208,7 @@ pub use routing_table::{Authority, Prefix, RoutingTable, Xorable};
 pub use routing_table::Error as RoutingTableError;
 #[cfg(any(test, feature = "use-mock-crust"))]
 pub use routing_table::verify_network_invariant;
+pub use sorted_vec::SortedVec;
 pub use types::MessageId;
 pub use xor_name::{XOR_NAME_BITS, XOR_NAME_LEN, XorName, XorNameFromHexError};
 

@@ -24,6 +24,7 @@ use rust_sodium::crypto::hash::sha256;
 use std::fmt;
 use std::result;
 use xor_name::XorName;
+use SortedVec;
 
 /// We use this to identify log entries.
 //TODO: why are we using SHA256?
@@ -67,7 +68,7 @@ pub struct MemberEntry {
     id: Digest,
     // List of members after applying this change, sorted by name.
     // TODO: do we want to list all PublicIds in each entry?
-    members: Vec<PublicId>,
+    members: SortedVec<PublicId>,
     // Change itself
     change: MemberChange,
 }
@@ -76,9 +77,7 @@ impl MemberEntry {
     /// Create a new entry, given the members of the section after a change, and the change itself.
     ///
     /// The list of members is sorted in this method.
-    pub fn new(mut members: Vec<PublicId>, change: MemberChange) -> Result<Self> {
-        members.sort_by_key(|id| *id.name());
-
+    pub fn new(members: SortedVec<PublicId>, change: MemberChange) -> Result<Self> {
         // Append all entries into a buffer and create a hash of that.
         // TODO: for security, the hash may want to include more details (e.g. full routing table)?
         let mut buf = vec![];
@@ -137,7 +136,7 @@ impl MemberLog {
     /// the network).
     pub fn new_first(our_id: PublicId, min_section_size: usize) -> Result<Self> {
         let change = MemberChange::InitialNode(*our_id.name());
-        let entry = MemberEntry::new(vec![our_id.clone()], change)?;
+        let entry = MemberEntry::new(vec![our_id.clone()].into(), change)?;
         let table = RoutingTable::new(*our_id.name(), min_section_size);
         Ok(MemberLog { log: vec![entry], own_id: our_id, table: table })
     }
