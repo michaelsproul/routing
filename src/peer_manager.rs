@@ -380,7 +380,6 @@ pub struct PeerManager {
     /// Peers we expect to connect to
     expected_peers: HashMap<XorName, Instant>,
     proxy_peer_id: Option<PeerId>,
-    our_public_id: PublicId,
     /// Joining nodes which want to join our section
     candidates: HashMap<XorName, Candidate>,
     // Log of routing table changes
@@ -389,37 +388,21 @@ pub struct PeerManager {
 
 impl PeerManager {
     /// Returns a new peer manager with no entries.
-    pub fn new(is_first: bool, min_section_size: usize, our_public_id: PublicId) -> PeerManager {
-        let mut log = MemberLog::new(*our_public_id.name(), min_section_size);
-        if is_first {
-            //TODO: handle error!
-            unwrap!(log.insert_initial());
-        }
+    pub fn new(log: MemberLog) -> PeerManager {
         PeerManager {
             connection_token_map: HashMap::new(),
             peer_map: PeerMap::new(),
             unknown_peers: HashMap::new(),
             expected_peers: HashMap::new(),
             proxy_peer_id: None,
-            our_public_id: our_public_id,
             candidates: HashMap::new(),
             log: log,
         }
     }
 
     /// Clears the routing table and resets this node's public ID.
-    pub fn reset_routing_table(&mut self, our_public_id: PublicId) {
-        if !self.log.table().is_empty() {
-            warn!("{:?} Reset to {:?} from non-empty routing table {:?}.",
-                  self,
-                  our_public_id.name(),
-                  self.log.table())
-        }
-
-        let min_section_size = self.log.table().min_section_size();
-        self.our_public_id = our_public_id;
-        let new_rt = RoutingTable::new(*our_public_id.name(), min_section_size);
-        self.log.set_table(new_rt);
+    pub fn relocate(&mut self, our_public_id: PublicId) {
+        self.log.relocate(our_public_id)
     }
 
     /// Add prefixes into routing table.
@@ -1098,8 +1081,8 @@ impl PeerManager {
     /// know about (i.e. unknown names are ignored).
     pub fn get_pub_ids(&self, names: &HashSet<XorName>) -> BTreeSet<PublicId> {
         names.into_iter()
-            .filter_map(|name| if name == self.our_public_id.name() {
-                Some(self.our_public_id)
+            .filter_map(|name| if name == self.log.own_id().name() {
+                Some(*self.log.own_id())
             } else if let Some(peer) = self.peer_map.get_by_name(name) {
                 Some(*peer.pub_id())
             } else {
