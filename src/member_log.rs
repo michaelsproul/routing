@@ -20,6 +20,9 @@ use routing_table::RoutingTable;
 use rust_sodium::crypto::hash::sha256;
 use std::result;
 use xor_name::XorName;
+use std::collections::BTreeSet;
+use rust_sodium::crypto::box_::PublicKey;
+use rust_sodium::crypto::sign::Signature;
 
 /// We use this to identify log entries.
 //TODO: why are we using SHA256?
@@ -33,43 +36,102 @@ pub type Result<T> = result::Result<T, MemberLogError>;
 pub enum MemberChange {
     /// The node starting a network
     InitialNode(XorName),
+    NodeAdded {
+        prev_hash: Digest,
+        new_name: XorName,
+    },
+    NodeLost {
+        prev_hash: Digest,
+        lost_name: XorName,
+    },
+    SectionSplit {
+        prev_hash: Digest,
+        /// Members of the section on this side of the split.
+        /// TODO: maybe include node names in `group_members` too.
+        group_members: BTreeSet<PublicKey>,
+    },
+    SectionMerge {
+        /// Hash of previous block for lexicographically lesser section (P0).
+        left_hash: Digest,
+        /// Hash of previous block for lexicographically greater section (P1).
+        right_hash: Digest,
+    }
 }
 
 /// Entry recording a membership change
 //TODO: add PublicId of each node?
 //TODO: add checksum of table after changes?
+// TODO: maybe delete this entirely in favour of just using MemberChange, the id is computable
+// from the change field (and doesn't need to be stored).
 #[derive(Clone, RustcEncodable, RustcDecodable)]
 pub struct MemberEntry {
     // Identifier of this change, applied over the previous change
     id: Digest,
-    // identifier of previous change
-    prev_id: Digest,
     // Change itself
     change: MemberChange,
 }
 
 impl MemberEntry {
     /// Create a new entry, given the identifier of the previous entry, a checksum, and a change.
-    pub fn new(prev_id: Digest, change: MemberChange) -> Result<Self> {
+    pub fn new(change: MemberChange) -> Result<Self> {
         // Append all entries into a buffer and create a hash of that.
         // TODO: for security, the hash may want to include more details (e.g. full routing table)?
         let mut buf = vec![];
-        buf.extend_from_slice(prev_id.as_ref());
         // TODO: why does serialise return a Result??
         buf.extend_from_slice(&serialise(&change)?);
 
         Ok(MemberEntry {
             id: sha256::hash(&buf),
-            prev_id: prev_id,
             change: change,
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct Block {
+    data_segment: MemberEntry,
+    signature_segment: BTreeSet<(PublicKey, Signature)>
+}
+
+impl Block {
+    // TODO: maybe return a Result<(), SomeError>
+    // TODO: remove allow(unused)
+    #[allow(unused)]
+    fn is_successor_of(&self, prev_block: &Block) -> bool {
+        use self::MemberChange::*;
+
+        // Check that the second block isn't an initial node.
+        if let InitialNode(..) = self.data_segment.change {
+            return false;
+        }
+
+        // Check hash.
+        match self.data_segment.change {
+            NodeAdded { prev_hash, .. } |
+            NodeLost { prev_hash, .. } |
+            SectionSplit { prev_hash, .. } => {
+                if prev_hash != prev_block.data_segment.id {
+                    return false;
+                }
+            }
+            SectionMerge { left_hash, right_hash, .. } => {
+                let prev_block_hash = prev_block.data_segment.id;
+                if left_hash != prev_block_hash && right_hash != prev_block_hash {
+                    return false;
+                }
+            }
+            InitialNode(..) => unreachable!(),
+        }
+
+        // TODO: check signatures
+        true
     }
 }
 
 /// Log of section membership changes
 #[derive(Clone)]
 pub struct MemberLog {
-    log: Vec<MemberEntry>,
+    log: Vec<Block>,
     table: RoutingTable<XorName>,
 }
 
@@ -90,31 +152,25 @@ impl MemberLog {
             return Err(MemberLogError::InvalidState);
         }
 
-        // Use 0 as the initial hash / identifier.
-        let initial_hash = Digest::from_slice(&[0u8; 32]).ok_or(MemberLogError::Digest)?;
-        let node_name = *self.table.our_name();
-        let change = MemberChange::InitialNode(node_name);
-        // Initial name sum is just first name:
-        let entry = MemberEntry::new(initial_hash, change)?;
-        self.log.push(entry);
+        let change = MemberChange::InitialNode(*self.table.our_name());
+        let entry = MemberEntry::new(change)?;
+        // TODO: sign block here with initial key.
+        let block = Block { data_segment: entry, signature_segment: BTreeSet::new() };
+        self.log.push(block);
         Ok(())
     }
 
     /// Try to append an entry to the log
     //TODO: use
     #[allow(unused)]
-    pub fn append(&mut self, entry: MemberEntry) -> Result<()> {
-        if self.log.last().ok_or(MemberLogError::InvalidState)?.id != entry.prev_id {
+    pub fn append(&mut self, block: Block) -> Result<()> {
+        if !block.is_successor_of(self.log.last().ok_or(MemberLogError::InvalidState)?) {
             // Refuse to apply if hash doesn't match
             return Err(MemberLogError::PrevIdMismatch);
         }
 
-        match &entry.change {
-            &MemberChange::InitialNode(_) => return Err(MemberLogError::CannotAppendInitialEntry),
-        }
-
         // TODO: check table checksum. (But we can't do any more than warn about errors?)
-        self.log.push(entry);
+        self.log.push(block);
         Ok(())
     }
 
