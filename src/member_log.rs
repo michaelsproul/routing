@@ -20,9 +20,6 @@ use routing_table::RoutingTable;
 use rust_sodium::crypto::hash::sha256;
 use std::result;
 use xor_name::XorName;
-use std::collections::BTreeSet;
-use rust_sodium::crypto::box_::PublicKey;
-use rust_sodium::crypto::sign::Signature;
 
 /// We use this to identify log entries.
 //TODO: why are we using SHA256?
@@ -32,10 +29,13 @@ pub type Digest = sha256::Digest;
 pub type Result<T> = result::Result<T, MemberLogError>;
 
 /// What happened in a change
+//TODO: enable Rustfmt when commented-out code has been enabled
+#[cfg_attr(rustfmt, rustfmt_skip)]
 #[derive(Clone, RustcEncodable, RustcDecodable)]
 pub enum MemberChange {
     /// The node starting a network
     InitialNode(XorName),
+    /*
     NodeAdded {
         prev_hash: Digest,
         new_name: XorName,
@@ -46,9 +46,6 @@ pub enum MemberChange {
     },
     SectionSplit {
         prev_hash: Digest,
-        /// Members of the section on this side of the split.
-        /// TODO: maybe include node names in `group_members` too.
-        group_members: BTreeSet<PublicKey>,
     },
     SectionMerge {
         /// Hash of previous block for lexicographically lesser section (P0).
@@ -56,6 +53,7 @@ pub enum MemberChange {
         /// Hash of previous block for lexicographically greater section (P1).
         right_hash: Digest,
     }
+    */
 }
 
 /// Entry recording a membership change
@@ -85,42 +83,33 @@ impl MemberEntry {
             change: change,
         })
     }
-}
 
-#[derive(Clone)]
-pub struct Block {
-    data_segment: MemberEntry,
-    signature_segment: BTreeSet<(PublicKey, Signature)>
-}
-
-impl Block {
     // TODO: maybe return a Result<(), SomeError>
     // TODO: remove allow(unused)
     #[allow(unused)]
-    fn is_successor_of(&self, prev_block: &Block) -> bool {
+    //TODO: enable Rustfmt when commented-out code has been enabled
+    #[cfg_attr(rustfmt, rustfmt_skip)]
+    fn is_successor_of(&self, prev_entry: &MemberEntry) -> bool {
         use self::MemberChange::*;
 
-        // Check that the second block isn't an initial node.
-        if let InitialNode(..) = self.data_segment.change {
-            return false;
-        }
-
         // Check hash.
-        match self.data_segment.change {
+        match self.change {
+            /*
             NodeAdded { prev_hash, .. } |
             NodeLost { prev_hash, .. } |
             SectionSplit { prev_hash, .. } => {
-                if prev_hash != prev_block.data_segment.id {
+                if prev_hash != prev_entry.id {
                     return false;
                 }
             }
             SectionMerge { left_hash, right_hash, .. } => {
-                let prev_block_hash = prev_block.data_segment.id;
-                if left_hash != prev_block_hash && right_hash != prev_block_hash {
+                let prev_hash = prev_entry.id;
+                if left_hash != prev_hash && right_hash != prev_hash {
                     return false;
                 }
             }
-            InitialNode(..) => unreachable!(),
+            */
+            InitialNode(..) => return false,
         }
 
         // TODO: check signatures
@@ -131,7 +120,7 @@ impl Block {
 /// Log of section membership changes
 #[derive(Clone)]
 pub struct MemberLog {
-    log: Vec<Block>,
+    log: Vec<MemberEntry>,
     table: RoutingTable<XorName>,
 }
 
@@ -154,16 +143,14 @@ impl MemberLog {
 
         let change = MemberChange::InitialNode(*self.table.our_name());
         let entry = MemberEntry::new(change)?;
-        // TODO: sign block here with initial key.
-        let block = Block { data_segment: entry, signature_segment: BTreeSet::new() };
-        self.log.push(block);
+        self.log.push(entry);
         Ok(())
     }
 
     /// Try to append an entry to the log
     //TODO: use
     #[allow(unused)]
-    pub fn append(&mut self, block: Block) -> Result<()> {
+    pub fn append(&mut self, block: MemberEntry) -> Result<()> {
         if !block.is_successor_of(self.log.last().ok_or(MemberLogError::InvalidState)?) {
             // Refuse to apply if hash doesn't match
             return Err(MemberLogError::PrevIdMismatch);
