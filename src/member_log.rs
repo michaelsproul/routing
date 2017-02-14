@@ -17,18 +17,18 @@
 
 #![cfg_attr(rustfmt, rustfmt_skip)]
 
+use SortedVec;
 use id::PublicId;
-use maidsafe_utilities::serialisation::{SerialisationError, serialise};
+use maidsafe_utilities::serialisation::serialise;
 use routing_table::RoutingTable;
 use rust_sodium::crypto::hash::sha256;
 use std::fmt;
 use std::result;
 use xor_name::XorName;
-use SortedVec;
 
 /// We use this to identify log entries.
 //TODO: why are we using SHA256?
-pub type Digest = sha256::Digest;
+pub type LogId = sha256::Digest;
 
 /// Internal result type
 pub type Result<T> = result::Result<T, MemberLogError>;
@@ -38,23 +38,27 @@ pub type Result<T> = result::Result<T, MemberLogError>;
 pub enum MemberChange {
     /// The node starting a network
     InitialNode(XorName),
+    /// Used for logs which don't go back to the `InitialNode`.
+    ///
+    /// Like `InitialNode`, this is not a successor to anything.
+    StartPoint(LogId),
     /*
     NodeAdded {
-        prev_hash: Digest,
+        prev_hash: LogId,
         new_name: XorName,
     },
     NodeLost {
-        prev_hash: Digest,
+        prev_hash: LogId,
         lost_name: XorName,
     },
     SectionSplit {
-        prev_hash: Digest,
+        prev_hash: LogId,
     },
     SectionMerge {
         /// Hash of previous block for lexicographically lesser section (P0).
-        left_hash: Digest,
+        left_hash: LogId,
         /// Hash of previous block for lexicographically greater section (P1).
-        right_hash: Digest,
+        right_hash: LogId,
     }
     */
 }
@@ -65,7 +69,7 @@ pub enum MemberChange {
 #[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
 pub struct MemberEntry {
     // Identifier of this change, applied over the previous change
-    id: Digest,
+    id: LogId,
     // List of members after applying this change, sorted by name.
     // TODO: do we want to list all PublicIds in each entry?
     members: SortedVec<PublicId>,
@@ -77,19 +81,26 @@ impl MemberEntry {
     /// Create a new entry, given the members of the section after a change, and the change itself.
     ///
     /// The list of members is sorted in this method.
-    pub fn new(members: SortedVec<PublicId>, change: MemberChange) -> Result<Self> {
-        // Append all entries into a buffer and create a hash of that.
-        // TODO: for security, the hash may want to include more details (e.g. full routing table)?
-        let mut buf = vec![];
-        // TODO: why does serialise return a Result??
-        buf.extend_from_slice(&serialise(&members)?);
-        buf.extend_from_slice(&serialise(&change)?);
+    pub fn new(members: SortedVec<PublicId>, change: MemberChange) -> Self {
+        let id = if let MemberChange::StartPoint(id) = change {
+            //TODO: this is a hack; maybe there's a better solution?
+            id
+        } else {
+            // Append all entries into a buffer and create a hash of that.
+            // TODO: for security, the hash may want to include more details (e.g. full routing table)?
+            let mut buf = vec![];
+            // TODO: serialisation _shouldn't_ fail, but the API doesn't guarantee that it won't.
+            // Find a way of handling this; ideally don't return a `Result` everywhere.
+            buf.extend_from_slice(&unwrap!(serialise(&members)));
+            buf.extend_from_slice(&unwrap!(serialise(&change)));
+            sha256::hash(&buf)
+        };
 
-        Ok(MemberEntry {
-            id: sha256::hash(&buf),
+        MemberEntry {
+            id: id,
             members: members,
             change: change,
-        })
+        }
     }
 
     // TODO: maybe return a Result<(), SomeError>
@@ -100,6 +111,9 @@ impl MemberEntry {
 
         // Check hash.
         match self.change {
+            InitialNode(..) => return false,
+            // StartPoint will never be appended after another entry
+            StartPoint(..) => return false,
             /*
             NodeAdded { prev_hash, .. } |
             NodeLost { prev_hash, .. } |
@@ -115,7 +129,6 @@ impl MemberEntry {
                 }
             }
             */
-            InitialNode(..) => return false,
         }
 
         // TODO: check signatures
@@ -134,11 +147,11 @@ pub struct MemberLog {
 impl MemberLog {
     /// Create a new log as the first node (i.e. state in the log that this is the initial node in
     /// the network).
-    pub fn new_first(our_id: PublicId, min_section_size: usize) -> Result<Self> {
+    pub fn new_first(our_id: PublicId, min_section_size: usize) -> Self {
         let change = MemberChange::InitialNode(*our_id.name());
-        let entry = MemberEntry::new(vec![our_id.clone()].into(), change)?;
+        let entry = MemberEntry::new(vec![our_id.clone()].into(), change);
         let table = RoutingTable::new(*our_id.name(), min_section_size);
-        Ok(MemberLog { log: vec![entry], own_id: our_id, table: table })
+        MemberLog { log: vec![entry], own_id: our_id, table: table }
     }
 
     /// Create a new, empty log, with a valid routing table.
@@ -149,8 +162,10 @@ impl MemberLog {
         MemberLog { log: vec![], own_id: our_id, table: table }
     }
 
-    /// Node has relocated: clear the log and table, and change our id.
-    pub fn relocate(&mut self, our_id: PublicId) {
+    /// Node has relocated: clear the table, and change our id. Clear the log, and give it a new
+    /// "start point" where `log_id` is the starting point in our neighbour's log, and `members` is
+    /// the list of members in our section (after adding us).
+    pub fn relocate(&mut self, our_id: PublicId, log_id: LogId, members: SortedVec<PublicId>) {
         if !self.log.is_empty() {
             warn!("{:?} Reset to {:?} from non-empty log.", self, our_id.name());
         }
@@ -158,7 +173,9 @@ impl MemberLog {
         let min_section_size = self.table().min_section_size();
         self.table = RoutingTable::new(*our_id.name(), min_section_size);
         self.own_id = our_id;
-        self.log = vec![]; //TODO: should we set log at the same time?
+        let change = MemberChange::StartPoint(log_id);
+        let entry = MemberEntry::new(members, change);
+        self.log = vec![entry];
     }
 
     /// Try to append an entry to the log
@@ -190,6 +207,12 @@ impl MemberLog {
     pub fn table_mut(&mut self) -> &mut RoutingTable<XorName> {
         &mut self.table
     }
+
+    /// Return the last identifier in the log.
+    // TODO: I don't think we'll want this eventually. At least, check usages.
+    pub fn last_id(&self) -> Result<LogId> {
+        self.log.last().map(|entry| entry.id).ok_or(MemberLogError::InvalidState)
+    }
 }
 
 impl fmt::Debug for MemberLog {
@@ -211,18 +234,7 @@ impl fmt::Debug for MemberLog {
 }
 
 #[derive(Debug)]
-//TODO: for some reason values used in unused methods aren't counted.
-#[allow(unused)]
 pub enum MemberLogError {
-    CannotAppendInitialEntry,
-    Digest,
     InvalidState,
     PrevIdMismatch,
-    Serialisation(SerialisationError),
-}
-
-impl From<SerialisationError> for MemberLogError {
-    fn from(e: SerialisationError) -> Self {
-        MemberLogError::Serialisation(e)
-    }
 }

@@ -15,6 +15,7 @@
 // Please review the Licences for the specific language governing permissions and limitations
 // relating to use of the SAFE Network Software.
 
+use SortedVec;
 use ack_manager::{ACK_TIMEOUT_SECS, Ack, AckManager};
 use action::Action;
 use cache::Cache;
@@ -27,7 +28,7 @@ use id::{FullId, PublicId};
 use itertools::Itertools;
 use log::LogLevel;
 use maidsafe_utilities::serialisation;
-use member_log::MemberLog;
+use member_log::{LogId, MemberLog};
 use messages::{DEFAULT_PRIORITY, DirectMessage, HopMessage, MAX_PART_LEN, Message, MessageContent,
                RoutingMessage, SectionList, SignedMessage, UserMessage, UserMessageCache};
 use outbox::EventBox;
@@ -137,14 +138,7 @@ impl Node {
                  -> Option<Self> {
         let name = XorName(sha256::hash(&full_id.public_id().name().0).0);
         full_id.public_id_mut().set_name(name);
-        let log = match MemberLog::new_first(full_id.public_id().clone(), min_section_size) {
-            Ok(log) => log,
-            Err(e) => {
-                //TODO: return Result instead?
-                error!("{:?} Failed to create log: {:?}", full_id.public_id(), e);
-                return None;
-            }
-        };
+        let log = MemberLog::new_first(full_id.public_id().clone(), min_section_size);
 
         let mut node = Self::new(cache,
                                  crust_service,
@@ -882,8 +876,8 @@ impl Node {
                                                   peer_id,
                                                   message_id)
             }
-            (GetNodeNameResponse { relocated_id, section, .. }, Section(_), dst) => {
-                Ok(self.handle_get_node_name_response(relocated_id, section, dst, outbox))
+            (GetNodeNameResponse { relocated_id, log_id, members, .. }, Section(_), dst) => {
+                Ok(self.handle_get_node_name_response(relocated_id, log_id, members, dst, outbox))
             }
             (ExpectCandidate { expect_id, client_auth, message_id }, Section(_), Section(_)) => {
                 self.handle_expect_candidate(expect_id, client_auth, message_id)
@@ -1900,10 +1894,11 @@ impl Node {
     }
 
     // Context: we're a new node joining a section. This message should have been sent by each node
-    // in the target section with the new node name and the section for resource proving.
+    // in the target section.
     fn handle_get_node_name_response(&mut self,
                                      relocated_id: PublicId,
-                                     section: BTreeSet<PublicId>,
+                                     log_id: LogId,
+                                     members: SortedVec<PublicId>,
                                      dst: Authority<XorName>,
                                      outbox: &mut EventBox) {
         if !self.full_id.public_id().is_client_id() {
@@ -1918,10 +1913,11 @@ impl Node {
             .schedule(Duration::from_secs(APPROVAL_PROGRESS_INTERVAL_SECS)));
 
         self.full_id.public_id_mut().set_name(*relocated_id.name());
-        self.peer_mgr.relocate(*self.full_id.public_id());
-        self.challenger_count = section.len();
+        // TODO: can we move this to end of function instead of cloning members?
+        self.peer_mgr.relocate(*self.full_id.public_id(), log_id, members.clone());
+        self.challenger_count = members.len();
         if let Some((_, proxy_public_id)) = self.peer_mgr.proxy() {
-            if section.contains(proxy_public_id) {
+            if members.contains(proxy_public_id) {
                 self.proxy_is_resource_proof_challenger = true;
                 // exclude the proxy as it sends a trivial challenge
                 self.challenger_count -= 1;
@@ -1932,9 +1928,9 @@ impl Node {
                self.peer_mgr.routing_table().prefixes());
         info!("{:?} Received relocated name. Establishing connections to {} peers.",
               self,
-              section.len());
+              members.len());
 
-        for pub_id in &section {
+        for pub_id in &members {
             debug!("{:?} Sending connection info to {:?} on GetNodeName response.",
                    self,
                    pub_id);
@@ -2019,10 +2015,12 @@ impl Node {
         self.candidate_timer_token = Some(self.timer
             .schedule(Duration::from_secs(RESOURCE_PROOF_DURATION_SECS)));
 
-        let own_section = self.peer_mgr.accept_as_candidate(*candidate_id.name(), client_auth);
+        let (log_id, members) = self.peer_mgr
+            .accept_as_candidate(*candidate_id.name(), client_auth)?;
         let response_content = MessageContent::GetNodeNameResponse {
             relocated_id: candidate_id,
-            section: own_section,
+            log_id: log_id,
+            members: members,
             message_id: message_id,
         };
         info!("{:?} Our section with {:?} accepted {} as a candidate.",

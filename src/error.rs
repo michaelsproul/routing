@@ -20,6 +20,7 @@ use crust::{self, PeerId};
 use event::Event;
 use maidsafe_utilities::event_sender::{EventSenderError, MaidSafeEventCategory};
 use maidsafe_utilities::serialisation;
+use member_log::MemberLogError;
 use std::sync::mpsc::{RecvError, SendError};
 use super::routing_table::Error as RoutingTableError;
 
@@ -81,6 +82,8 @@ pub enum RoutingError {
     RejectedClientMessage,
     /// Routing Table error
     RoutingTable(RoutingTableError),
+    /// Error passed from member_log module
+    MemberLog(MemberLogError),
     /// String errors
     Utf8(::std::str::Utf8Error),
     /// Interface error
@@ -127,6 +130,12 @@ pub enum RoutingError {
 impl From<RoutingTableError> for RoutingError {
     fn from(error: RoutingTableError) -> RoutingError {
         RoutingError::RoutingTable(error)
+    }
+}
+
+impl From<MemberLogError> for RoutingError {
+    fn from(error: MemberLogError) -> RoutingError {
+        RoutingError::MemberLog(error)
     }
 }
 

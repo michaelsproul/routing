@@ -18,6 +18,7 @@
 // TODO: should we keep unused functionality?
 #![allow(unused)]
 
+use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::ops::{Deref, Index};
@@ -107,6 +108,14 @@ impl<T: Ord> Index<usize> for SortedVec<T> {
 
 impl<T: Ord> From<Vec<T>> for SortedVec<T> {
     fn from(mut v: Vec<T>) -> Self {
+        v.sort();
+        SortedVec { v: v }
+    }
+}
+
+impl<T: Ord> From<BTreeSet<T>> for SortedVec<T> {
+    fn from(t: BTreeSet<T>) -> Self {
+        let mut v = Vec::from_iter(t.into_iter());
         v.sort();
         SortedVec { v: v }
     }

@@ -15,11 +15,12 @@
 // Please review the Licences for the specific language governing permissions and limitations
 // relating to use of the SAFE Network Software.
 
+use SortedVec;
 use crust::{PeerId, PrivConnectionInfo, PubConnectionInfo};
 use error::RoutingError;
 use id::PublicId;
 use itertools::Itertools;
-use member_log::MemberLog;
+use member_log::{LogId, MemberLog};
 use rand;
 use resource_proof::ResourceProof;
 use routing_table::{Authority, OtherMergeDetails, OwnMergeDetails, OwnMergeState, Prefix,
@@ -401,8 +402,11 @@ impl PeerManager {
     }
 
     /// Clears the routing table and resets this node's public ID.
-    pub fn relocate(&mut self, our_public_id: PublicId) {
-        self.log.relocate(our_public_id)
+    pub fn relocate(&mut self,
+                    our_public_id: PublicId,
+                    log_start_point: LogId,
+                    section_members: SortedVec<PublicId>) {
+        self.log.relocate(our_public_id, log_start_point, section_members)
     }
 
     /// Add prefixes into routing table.
@@ -444,17 +448,22 @@ impl PeerManager {
     /// Our section has agreed that the candidate should be accepted pending proof of resource.
     /// Replaces any other potential candidate we have previously voted for.  Sets the candidate
     /// state to `AcceptedAsCandidate`.
+    ///
+    /// Returns the identifier for the last log entry and the member list for our section at this
+    /// time.
     pub fn accept_as_candidate(&mut self,
                                candidate_name: XorName,
                                client_auth: Authority<XorName>)
-                               -> BTreeSet<PublicId> {
+                               -> Result<(LogId, SortedVec<PublicId>), RoutingError> {
         self.remove_unapproved_candidates(&candidate_name);
         self.candidates
             .entry(candidate_name)
             .or_insert_with(|| Candidate::new(client_auth))
             .state = CandidateState::AcceptedAsCandidate;
         let our_section = self.log.table().our_section();
-        self.get_pub_ids(our_section)
+        // TODO: we may need a new log entry here; we should get the section list from the log once
+        // it's the definitive source.)
+        Ok((self.log.last_id()?, self.get_pub_ids(our_section).into()))
     }
 
     /// Verifies proof of resource.  If the response is not the current candidate, or if it fails
