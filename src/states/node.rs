@@ -28,7 +28,7 @@ use id::{FullId, PublicId};
 use itertools::Itertools;
 use log::LogLevel;
 use maidsafe_utilities::serialisation;
-use member_log::{LogId, MemberLog};
+use member_log::{LogId, MemberChange, MemberEntry, MemberLog};
 use messages::{DEFAULT_PRIORITY, DirectMessage, HopMessage, MAX_PART_LEN, Message, MessageContent,
                RoutingMessage, SectionList, SignedMessage, UserMessage, UserMessageCache};
 use outbox::EventBox;
@@ -46,6 +46,7 @@ use rust_sodium::crypto::hash::sha256;
 use section_list_cache::SectionListCache;
 use signature_accumulator::{ACCUMULATION_TIMEOUT_SECS, SignatureAccumulator};
 use state_machine::Transition;
+use states::common::MAX_ROUTES;
 use stats::Stats;
 use std::{cmp, fmt, iter, mem};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -81,6 +82,9 @@ const APPROVAL_TIMEOUT_SECS: u64 = RESOURCE_PROOF_DURATION_SECS + ACCUMULATION_T
 const APPROVAL_PROGRESS_INTERVAL_SECS: u64 = 30;
 /// Interval between displaying info about current candidate, in seconds.
 const CANDIDATE_STATUS_INTERVAL_SECS: u64 = 60;
+/// Timeout on trying to accumulate a log entry. Must be longer than accumulation timeout times
+/// number of routes.
+const LOG_ENTRY_TIMEOUT_SECS: u64 = ACCUMULATION_TIMEOUT_SECS * (MAX_ROUTES + 1) as u64;
 
 pub struct Node {
     ack_mgr: AckManager,
@@ -127,6 +131,10 @@ pub struct Node {
     /// Whether our proxy is expected to be sending us a resource proof challenge (in which case it
     /// will be trivial) or not.
     proxy_is_resource_proof_challenger: bool,
+    /// Timer dictating when we can try sending another log entry
+    log_entry_timeout_token: Option<u64>,
+    /// Log entries we want to send but need to wait first
+    pending_log_entries: Vec<MemberEntry>,
 }
 
 impl Node {
@@ -138,6 +146,7 @@ impl Node {
                  -> Option<Self> {
         let name = XorName(sha256::hash(&full_id.public_id().name().0).0);
         full_id.public_id_mut().set_name(name);
+        assert!(min_section_size >= MAX_ROUTES as usize);
         let log = MemberLog::new_first(full_id.public_id().clone(), min_section_size);
 
         let mut node = Self::new(cache,
@@ -170,6 +179,7 @@ impl Node {
                               stats: Stats,
                               timer: Timer)
                               -> Option<Self> {
+        assert!(min_section_size >= MAX_ROUTES as usize);
         let log = MemberLog::new_empty(full_id.public_id().clone(), min_section_size);
         let mut node = Self::new(cache, crust_service, false, full_id, log, stats, timer);
 
@@ -227,6 +237,8 @@ impl Node {
             resource_proof_response_parts: HashMap::new(),
             challenger_count: 0,
             proxy_is_resource_proof_challenger: false,
+            log_entry_timeout_token: None,
+            pending_log_entries: vec![],
         }
     }
 
@@ -938,6 +950,7 @@ impl Node {
             (OtherSectionMerge(section), PrefixSection(merge_prefix), PrefixSection(_)) => {
                 self.handle_other_section_merge(merge_prefix, section, outbox)
             }
+            (MemberLog(entry), Section(_), Section(_)) => Ok(self.handle_log_entry(entry)),
             (Ack(ack, _), _, _) => self.handle_ack_response(ack),
             (UserMessagePart { hash, part_count, part_index, payload, .. }, src, dst) => {
                 if let Some(msg) = self.user_msg_cache.add(hash, part_count, part_index, payload) {
@@ -2340,6 +2353,8 @@ impl Node {
                   self.resource_proof_response_progress(),
                   remaining_duration,
                   APPROVAL_TIMEOUT_SECS);
+        } else if self.log_entry_timeout_token == Some(token) {
+            self.reset_log_entry_timer();
         }
 
         self.resend_unacknowledged_timed_out_msgs(token);
@@ -2449,6 +2464,32 @@ impl Node {
         self.rt_timer_token = Some(self.timer.schedule(self.rt_timeout));
     }
 
+    fn reset_log_entry_timer(&mut self) {
+        self.log_entry_timeout_token = None;
+        self.pending_log_entries.sort(); // sorts, with highest priority last
+        while let Some(entry) = self.pending_log_entries.pop() {
+            if self.validate_pending_entry(&entry) {
+                self.send_log_entry_to_section(entry);
+                break;
+            }
+            // else: drop entry and check for another
+        }
+    }
+
+    fn handle_log_entry(&mut self, entry: MemberEntry) {
+        self.reset_log_entry_timer();
+        self.peer_mgr.handle_log_entry(entry)
+    }
+
+    // returns: true iff we still want to send entry (presumably we did once)
+    fn validate_pending_entry(&self, entry: &MemberEntry) -> bool {
+        match entry.change {
+            // should never be accumulated:
+            MemberChange::InitialNode(_) |
+            MemberChange::StartPoint(_) => false,
+        }
+    }
+
     // ----- Send Functions -----------------------------------------------------------------------
     fn send_user_message(&mut self,
                          src: Authority<XorName>,
@@ -2461,6 +2502,24 @@ impl Node {
             self.send_routing_message(src, dst, part)?;
         }
         Ok(())
+    }
+
+    // src: always ourself
+    // dst: always our section
+    fn send_log_entry_to_section(&mut self, entry: MemberEntry) {
+        if self.log_entry_timeout_token.is_none() {
+            self.log_entry_timeout_token = Some(self.timer
+                .schedule(Duration::from_secs(LOG_ENTRY_TIMEOUT_SECS)));
+            // Log entry agreement: we send a routing message from our section to itself, and rely
+            // on accumulation for agreement (with adjusted rules about when we can send).
+            let src = Authority::Section(*self.name());
+            let content = MessageContent::MemberLog(entry);
+            if let Err(e) = self.send_routing_message(src, src, content) {
+                warn!("{:?} Failed sending MemberLog: {:?}", self, e);
+            }
+        } else {
+            self.pending_log_entries.push(entry);
+        }
     }
 
     // Send signed_msg on route. Hop is the name of the peer we received this from, or our name if
@@ -2967,6 +3026,10 @@ impl Node {
                     duration.as_secs()
                 })
     }
+
+    fn min_section_size(&self) -> usize {
+        self.peer_mgr.routing_table().min_section_size()
+    }
 }
 
 impl Base for Node {
@@ -3068,11 +3131,6 @@ impl Bootstrapped for Node {
         &mut self.ack_mgr
     }
 
-    fn min_section_size(&self) -> usize {
-        self.peer_mgr.routing_table().min_section_size()
-    }
-
-
     // Constructs a signed message, finds the node responsible for accumulation, and either sends
     // this node a signature or tries to accumulate signatures for this message (on success, the
     // accumulator handles or forwards the message).
@@ -3124,7 +3182,7 @@ impl Bootstrapped for Node {
         match self.get_signature_target(&signed_msg.routing_message().src, route) {
             None => Ok(()),
             Some(our_name) if our_name == *self.name() => {
-                let min_section_size = self.min_section_size();
+                let min_section_size = self.peer_mgr.routing_table().min_section_size();
                 if let Some((msg, route)) =
                     self.sig_accumulator.add_message(signed_msg, min_section_size, route) {
                     if self.in_authority(&msg.routing_message().dst) {

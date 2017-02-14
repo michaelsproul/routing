@@ -253,6 +253,10 @@ impl Client {
         }
         Ok(())
     }
+
+    fn min_section_size(&self) -> usize {
+        self.min_section_size
+    }
 }
 
 impl Base for Client {
@@ -305,10 +309,6 @@ impl Bootstrapped for Client {
 
     fn ack_mgr_mut(&mut self) -> &mut AckManager {
         &mut self.ack_mgr
-    }
-
-    fn min_section_size(&self) -> usize {
-        self.min_section_size
     }
 
     fn resend_unacknowledged_timed_out_msgs(&mut self, token: u64) {

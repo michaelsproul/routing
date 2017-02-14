@@ -20,7 +20,7 @@ use crust::{PeerId, PrivConnectionInfo, PubConnectionInfo};
 use error::RoutingError;
 use id::PublicId;
 use itertools::Itertools;
-use member_log::{LogId, MemberLog};
+use member_log::{LogId, MemberChange, MemberEntry, MemberLog};
 use rand;
 use resource_proof::ResourceProof;
 use routing_table::{Authority, OtherMergeDetails, OwnMergeDetails, OwnMergeState, Prefix,
@@ -808,6 +808,16 @@ impl PeerManager {
         let needed_names = self.log.table_mut().merge_other_section(merge_details);
         self.expected_peers.extend(needed_names.iter().map(|name| (*name, Instant::now())));
         section.into_iter().filter(|pub_id| needed_names.contains(pub_id.name())).collect()
+    }
+
+    pub fn handle_log_entry(&mut self, entry: MemberEntry) {
+        match entry.change {
+            MemberChange::InitialNode(_) |
+            MemberChange::StartPoint(_) => {
+                // Neither of these entries should be accumulated and sent:
+                warn!("Received an unexpected log entry: {:?}", entry);
+            }
+        }
     }
 
     /// Returns `true` if we are directly connected to both peers.

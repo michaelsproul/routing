@@ -25,6 +25,7 @@ use rust_sodium::crypto::hash::sha256;
 use std::fmt;
 use std::result;
 use xor_name::XorName;
+use std::cmp::Ordering;
 
 /// We use this to identify log entries.
 //TODO: why are we using SHA256?
@@ -34,7 +35,7 @@ pub type LogId = sha256::Digest;
 pub type Result<T> = result::Result<T, MemberLogError>;
 
 /// What happened in a change
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, Eq, PartialEq, Hash)]
 pub enum MemberChange {
     /// The node starting a network
     InitialNode(XorName),
@@ -63,19 +64,48 @@ pub enum MemberChange {
     */
 }
 
+impl MemberChange {
+    // higher value is higher priority, equal only if types are equal
+    fn priority(&self) -> u32 {
+        match self {
+            &MemberChange::InitialNode(_) => 10000,
+            &MemberChange::StartPoint(_) => 9999,
+        }
+    }
+}
+
 /// Entry recording a membership change
 // TODO: maybe delete this entirely in favour of just using MemberChange, the id is computable
 // from the change field (and doesn't need to be stored).
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
+// TODO: should fields be pub?
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, Eq, PartialEq, Hash)]
 pub struct MemberEntry {
     // Identifier of this change, applied over the previous change
-    id: LogId,
+    pub id: LogId,
     // List of members after applying this change, sorted by name.
     // TODO: do we want to list all PublicIds in each entry?
-    members: SortedVec<PublicId>,
+    pub members: SortedVec<PublicId>,
     // Change itself
-    change: MemberChange,
+    pub change: MemberChange,
 }
+
+impl Ord for MemberEntry {
+    fn cmp(&self, other: &MemberEntry) -> Ordering {
+        match (self.change.priority(), other.change.priority()) {
+            // If same type, any consistent ordering is sufficient
+            (x, y) if x == y => self.id.cmp(&other.id),
+            (x, y) if x < y => Ordering::Less,
+            _ => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for MemberEntry {
+    fn partial_cmp(&self, other: &MemberEntry) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 
 impl MemberEntry {
     /// Create a new entry, given the members of the section after a change, and the change itself.
@@ -224,7 +254,7 @@ impl fmt::Debug for MemberLog {
         } else {
             let ll = self.log.len();
             write!(f,
-                   "\tLog: [{:?}, <omitted {} entries>, {:?}, {:?}]",
+                    "\tLog: [{:?}, <omitted {} entries>, {:?}, {:?}]",
                    self.log[0],
                    ll - 3,
                    self.log[ll - 2],

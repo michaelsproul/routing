@@ -76,6 +76,7 @@ pub struct Stats {
     msg_get_node_name_rsp: usize,
     msg_candidate_approval: usize,
     msg_node_approval: usize,
+    msg_member_log: usize,
     msg_ack: usize,
 
     msg_other: usize,
@@ -160,6 +161,7 @@ impl Stats {
             MessageContent::Ack(..) => self.msg_ack += 1,
             MessageContent::CandidateApproval { .. } => self.msg_candidate_approval += 1,
             MessageContent::NodeApproval { .. } => self.msg_node_approval += 1,
+            MessageContent::MemberLog { .. } => self.msg_member_log += 1,
             MessageContent::UserMessagePart { .. } => return, // Counted as request/response.
         }
         self.increment_msg_total();
@@ -210,14 +212,16 @@ impl Stats {
                   self.unacked_msgs);
             info!(target: "routing_stats",
                   "Stats - Direct - NodeIdentify: {}, CandidateIdentify: {}, \
-                   MessageSignature: {}, ResourceProof: {}/{}/{}, SectionListSignature: {}",
+                   MessageSignature: {}, ResourceProof: {}/{}/{}, SectionListSignature: {}, \
+                   MemberLog: {}",
                   self.msg_direct_node_identify,
                   self.msg_direct_candidate_identify,
                   self.msg_direct_sig,
                   self.msg_direct_resource_proof,
                   self.msg_direct_resource_proof_rsp,
                   self.msg_direct_resource_proof_rsp_receipt,
-                  self.msg_direct_sls);
+                  self.msg_direct_sls,
+                  self.msg_member_log);
             info!(target: "routing_stats",
                   "Stats - Hops (Request/Response) - GetNodeName: {}/{}, ExpectCandidate: {}, \
                    AcceptAsCandidate: {}, SectionUpdate: {}, SectionSplit: {}, \

@@ -27,7 +27,7 @@ use itertools::Itertools;
 use lru_time_cache::LruCache;
 use maidsafe_utilities;
 use maidsafe_utilities::serialisation::{deserialise, serialise};
-use member_log::LogId;
+use member_log::{LogId, MemberEntry};
 #[cfg(feature = "use-mock-crust")]
 use mock_crust::crust::PeerId;
 use peer_manager::SectionMap;
@@ -748,6 +748,8 @@ pub enum MessageContent {
         /// contacts.
         sections: SectionMap,
     },
+    /// A log entry
+    MemberLog(MemberEntry),
 }
 
 impl MessageContent {
@@ -915,6 +917,7 @@ impl Debug for MessageContent {
                        sections)
             }
             NodeApproval { ref sections } => write!(formatter, "NodeApproval {{ {:?} }}", sections),
+            MemberLog(ref entry) => write!(formatter, "MemberLog {{ {:?} }}", entry),
         }
     }
 }

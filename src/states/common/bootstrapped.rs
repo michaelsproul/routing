@@ -24,7 +24,7 @@ use routing_message_filter::RoutingMessageFilter;
 use routing_table::Authority;
 use std::collections::BTreeSet;
 use std::time::Duration;
-use super::Base;
+use super::{Base, MAX_ROUTES};
 use timer::Timer;
 use xor_name::XorName;
 
@@ -33,7 +33,6 @@ use xor_name::XorName;
 pub trait Bootstrapped: Base {
     fn ack_mgr(&self) -> &AckManager;
     fn ack_mgr_mut(&mut self) -> &mut AckManager;
-    fn min_section_size(&self) -> usize;
 
     fn send_routing_message_via_route(&mut self,
                                       routing_msg: RoutingMessage,
@@ -105,7 +104,7 @@ pub trait Bootstrapped: Base {
                    ack,
                    unacked_msg);
 
-            if unacked_msg.route as usize == self.min_section_size() {
+            if unacked_msg.route == MAX_ROUTES {
                 debug!("{:?} Message unable to be acknowledged - giving up. {:?}",
                        self,
                        unacked_msg);
