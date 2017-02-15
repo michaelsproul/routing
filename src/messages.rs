@@ -689,8 +689,8 @@ pub enum MessageContent {
         /// The message's unique identifier.
         message_id: MessageId,
     },
-    /// Sent to all connected peers when our own section splits
-    SectionSplit(Prefix<XorName>, XorName),
+    /// Sent to all connected peers when our own section splits, with our pre-split prefix.
+    SectionSplit(Prefix<XorName>),
     /// Sent amongst members of a newly-merged section to allow synchronisation of their routing
     /// tables before notifying other connected peers of the merge.
     ///
@@ -886,9 +886,7 @@ impl Debug for MessageContent {
                        members,
                        message_id)
             }
-            SectionSplit(ref prefix, ref joining_node) => {
-                write!(formatter, "SectionSplit({:?}, {:?})", prefix, joining_node)
-            }
+            SectionSplit(ref prefix) => write!(formatter, "SectionSplit({:?})", prefix),
             OwnSectionMerge(ref sections) => write!(formatter, "OwnSectionMerge({:?})", sections),
             OtherSectionMerge(ref section) => write!(formatter, "OtherSectionMerge({:?})", section),
             Ack(ack, priority) => write!(formatter, "Ack({:?}, {})", ack, priority),
@@ -1318,7 +1316,7 @@ mod tests {
                 proxy_node_name: name,
             },
             dst: Authority::ClientManager(name),
-            content: MessageContent::SectionSplit(Prefix::new(0, name), name),
+            content: MessageContent::SectionSplit(Prefix::new(0, name)),
         };
         let senders = iter::empty().collect();
         let signed_message_result = SignedMessage::new(routing_message.clone(), &full_id, senders);
@@ -1420,7 +1418,7 @@ mod tests {
         let routing_message = RoutingMessage {
             src: Authority::ClientManager(name),
             dst: Authority::ClientManager(name),
-            content: MessageContent::SectionSplit(Prefix::new(0, name), name),
+            content: MessageContent::SectionSplit(Prefix::new(0, name)),
         };
         let full_id = FullId::new();
         let senders = iter::empty().collect();

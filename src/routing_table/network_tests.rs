@@ -81,18 +81,20 @@ impl Network {
         // TODO: needs to verify how to broadcasting such info
         for node in self.nodes.values_mut() {
             match node.add(name) {
-                Ok(true) => {
-                    split_prefixes.insert(*node.our_prefix());
+                Ok(()) => {
+                    if node.we_should_split() {
+                        split_prefixes.insert(*node.our_prefix());
+                    }
                 }
-                Ok(false) => {}
                 Err(e) => trace!("failed to add node with error {:?}", e),
             }
             match new_table.add(*node.our_name()) {
-                Ok(true) => {
-                    let prefix = *new_table.our_prefix();
-                    let _ = new_table.split(prefix);
+                Ok(()) => {
+                    if new_table.we_should_split() {
+                        let prefix = *new_table.our_prefix();
+                        let _ = new_table.split(prefix);
+                    }
                 }
-                Ok(false) => {}
                 Err(e) => trace!("failed to add node into new with error {:?}", e),
             }
         }

@@ -20,7 +20,7 @@ use crust::{PeerId, PrivConnectionInfo, PubConnectionInfo};
 use error::RoutingError;
 use id::PublicId;
 use itertools::Itertools;
-use member_log::{LogId, MemberChange, MemberEntry, MemberLog};
+use member_log::{LogId, MemberChange, MemberEntry, MemberLog, MemberLogError};
 use rand;
 use resource_proof::ResourceProof;
 use routing_table::{Authority, OtherMergeDetails, OwnMergeDetails, OwnMergeState, Prefix,
@@ -460,10 +460,11 @@ impl PeerManager {
             .entry(candidate_name)
             .or_insert_with(|| Candidate::new(client_auth))
             .state = CandidateState::AcceptedAsCandidate;
+        let log_id = self.log.last_id().ok_or(MemberLogError::InvalidState)?;
         let our_section = self.log.table().our_section();
         // TODO: we may need a new log entry here; we should get the section list from the log once
         // it's the definitive source.)
-        Ok((self.log.last_id()?, self.get_pub_ids(our_section).into()))
+        Ok((log_id, self.get_pub_ids(our_section).into()))
     }
 
     /// Verifies proof of resource.  If the response is not the current candidate, or if it fails
@@ -648,21 +649,25 @@ impl PeerManager {
     pub fn add_to_routing_table(&mut self,
                                 pub_id: &PublicId,
                                 peer_id: &PeerId)
-                                -> Result<bool, RoutingTableError> {
+                                -> Result<(), RoutingTableError> {
         let _ = self.unknown_peers.remove(peer_id);
         let _ = self.expected_peers.remove(pub_id.name());
 
-        let should_split = self.log.table_mut().add(*pub_id.name())?;
+        self.log.table_mut().add(*pub_id.name())?;
         let conn = self.peer_map
             .remove(peer_id)
             .map_or(RoutingConnection::Direct,
                     |peer| peer.to_routing_connection());
         let _ = self.peer_map.insert(Peer::new(*pub_id, Some(*peer_id), PeerState::Routing(conn)));
-        Ok(should_split)
+        Ok(())
     }
 
-    /// Splits the indicated section and returns the `PeerId`s of any peers to which we should not
-    /// remain connected.
+    /// Splits the indicated section and returns `(peers_to_drop, opt_prefix)`.
+    ///
+    /// `peers_to_drop` is a list of any peers to which we should not remain connected.
+    ///
+    /// `opt_prefix` is the new prefix for our section in the case we split our own section, or
+    /// `None` in the case we split a different section.
     pub fn split_section(&mut self,
                          prefix: Prefix<XorName>)
                          -> (Vec<(XorName, PeerId)>, Option<Prefix<XorName>>) {
@@ -810,14 +815,9 @@ impl PeerManager {
         section.into_iter().filter(|pub_id| needed_names.contains(pub_id.name())).collect()
     }
 
-    pub fn handle_log_entry(&mut self, entry: MemberEntry) {
-        match entry.change {
-            MemberChange::InitialNode(_) |
-            MemberChange::StartPoint(_) => {
-                // Neither of these entries should be accumulated and sent:
-                warn!("Received an unexpected log entry: {:?}", entry);
-            }
-        }
+    // Handle. If this is a valid new entry, return a reference to it (in the log).
+    pub fn handle_log_entry(&mut self, entry: MemberEntry) -> Option<&MemberEntry> {
+        self.log.append(entry)
     }
 
     /// Returns `true` if we are directly connected to both peers.
@@ -1402,6 +1402,31 @@ impl PeerManager {
             .map(|(prefix, names)| (prefix, self.get_pub_ids(&names)))
             .collect()
     }
+
+    // TODO: this should get from the log itself when that is up to date
+    fn get_current_members(&self) -> SortedVec<PublicId> {
+        self.log
+            .table()
+            .our_section()
+            .iter()
+            .filter_map(|name| if name == self.log.own_id().name() {
+                Some(*self.log.own_id())
+            } else if let Some(peer) = self.peer_map.get_by_name(name) {
+                Some(*peer.pub_id())
+            } else {
+                error!("{:?} Missing public ID for peer {:?}.", self, name);
+                None
+            })
+            .collect()
+    }
+
+    /// Make a log entry to split
+    pub fn make_split_entry(&self) -> Result<MemberEntry, RoutingError> {
+        let change = MemberChange::SectionSplit {
+            prev_id: self.log.last_id().ok_or(MemberLogError::InvalidState)?,
+        };
+        Ok(MemberEntry::new(self.get_current_members(), change))
+    }
 }
 
 impl fmt::Debug for PeerManager {
@@ -1463,7 +1488,8 @@ mod tests {
     pub fn connection_info_prepare_receive() {
         let min_section_size = 8;
         let orig_pub_id = *FullId::new().public_id();
-        let mut peer_mgr = PeerManager::new(true, min_section_size, orig_pub_id);
+        let log = MemberLog::new_first(orig_pub_id, min_section_size);
+        let mut peer_mgr = PeerManager::new(log);
 
         let our_connection_info = PrivConnectionInfo(PeerId(0), Endpoint(0));
         let their_connection_info = PubConnectionInfo(PeerId(1), Endpoint(1));
@@ -1501,7 +1527,8 @@ mod tests {
     pub fn connection_info_receive_prepare() {
         let min_section_size = 8;
         let orig_pub_id = *FullId::new().public_id();
-        let mut peer_mgr = PeerManager::new(true, min_section_size, orig_pub_id);
+        let log = MemberLog::new_first(orig_pub_id, min_section_size);
+        let mut peer_mgr = PeerManager::new(log);
         let our_connection_info = PrivConnectionInfo(PeerId(0), Endpoint(0));
         let their_connection_info = PubConnectionInfo(PeerId(1), Endpoint(1));
         let original_msg_id = MessageId::new();

@@ -352,6 +352,11 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
         }
     }
 
+    /// Tests whether the given prefix is in our routing table
+    pub fn has_prefix(&self, prefix: &Prefix<T>) -> bool {
+        self.our_prefix == *prefix || self.sections.keys().any(|k| k == prefix)
+    }
+
     /// Compute an estimate of the size of the network from the size of our routing table.
     ///
     /// Return (estimate, exact), with exact = true iff we have the whole network in our
@@ -498,7 +503,7 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
     /// of our sections, or it's our own name.  Otherwise it returns `Ok(true)` if the addition
     /// succeeded and should cause our section to split or `Ok(false)` if the addition succeeded and
     /// shouldn't cause a split.
-    pub fn add(&mut self, name: T) -> Result<bool, Error> {
+    pub fn add(&mut self, name: T) -> Result<(), Error> {
         if name == self.our_name {
             return Err(Error::OwnNameDisallowed);
         }
@@ -511,6 +516,11 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
             return Err(Error::PeerNameUnsuitable);
         }
 
+        Ok(())
+    }
+
+    /// Returns true if our section should split.
+    pub fn we_should_split(&self) -> bool {
         let split_size = self.min_split_size();
         let close_to_merging_with_us = |(prefix, section): (&Prefix<T>, &HashSet<T>)| {
             prefix.popped().is_compatible(&self.our_prefix) && section.len() < split_size
@@ -518,7 +528,7 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
         // If we're currently merging or are close to merging, we shouldn't split.
         if self.we_want_to_merge || self.they_want_to_merge ||
            self.sections.iter().any(close_to_merging_with_us) {
-            return Ok(false);
+            return false;
         }
 
         // Count the number of names which will end up in each new section if our section is split.
@@ -527,7 +537,7 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
             .filter(|name| self.our_name.common_prefix(name) > self.our_prefix.bit_count())
             .count();
         // If either of the two new sections will not contain enough entries, return `false`.
-        Ok(new_size >= split_size && self.our_section().len() >= split_size + new_size)
+        new_size >= split_size && self.our_section().len() >= split_size + new_size
     }
 
     /// Splits a section.
@@ -1191,40 +1201,41 @@ mod tests {
                 Err(e) => {
                     panic!("unexpected error: {}", e);
                 }
-                Ok(true) => {
+                Ok(()) => {
                     table.verify_invariant();
-                    let our_prefix = *table.our_prefix();
-                    assert!(our_prefix.matches(&new_name));
-                    let _ = table.split(our_prefix);
-                    table.verify_invariant();
-                }
-                Ok(false) => {
-                    table.verify_invariant();
-                    assert!(table.iter().any(|u| *u == new_name));
-                    if table.is_in_our_section(&new_name) {
-                        continue; // add() already checked for necessary split
-                    }
-
-                    // Not a split event for our section, but might be for a different section.
-                    let section_prefix = table.find_section_prefix(&new_name)
-                        .expect("get section added to");
-                    let (section_len, new_section_size) = {
-                        let section =
-                            table.sections.get(&section_prefix).expect("get section from prefix");
-                        // Count size of section after an arbitrary split (note that there is only
-                        // one split possible; the arbitrariness is just which half we choose here).
-                        (section.len(),
-                         section.iter()
-                             .filter(|name| {
-                                 new_name.common_prefix(name) > section_prefix.bit_count()
-                             })
-                             .count())
-                    };
-                    let min_section_size = table.min_split_size();
-                    if new_section_size >= min_section_size &&
-                       section_len - new_section_size >= min_section_size {
-                        let _ = table.split(section_prefix); // do the split
+                    if table.we_should_split() {
+                        let our_prefix = *table.our_prefix();
+                        assert!(our_prefix.matches(&new_name));
+                        let _ = table.split(our_prefix);
                         table.verify_invariant();
+                    } else {
+                        assert!(table.iter().any(|u| *u == new_name));
+                        if table.is_in_our_section(&new_name) {
+                            continue; // add() already checked for necessary split
+                        }
+
+                        // Not a split event for our section, but might be for a different section.
+                        let section_prefix = table.find_section_prefix(&new_name)
+                            .expect("get section added to");
+                        let (section_len, new_section_size) = {
+                            let section = table.sections.get(&section_prefix)
+                                    .expect("get section from prefix");
+                            // Count size of section after an arbitrary split (note that there is
+                            // only one split possible; the arbitrariness is just which half we
+                            // choose here).
+                            (section.len(),
+                            section.iter()
+                                .filter(|name| {
+                                    new_name.common_prefix(name) > section_prefix.bit_count()
+                                })
+                                .count())
+                        };
+                        let min_section_size = table.min_split_size();
+                        if new_section_size >= min_section_size &&
+                        section_len - new_section_size >= min_section_size {
+                            let _ = table.split(section_prefix); // do the split
+                            table.verify_invariant();
+                        }
                     }
                 }
             }

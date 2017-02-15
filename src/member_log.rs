@@ -43,6 +43,10 @@ pub enum MemberChange {
     ///
     /// Like `InitialNode`, this is not a successor to anything.
     StartPoint(LogId),
+    /// Indicates an agreement to split. This is the last entry before split.
+    SectionSplit {
+        prev_id: LogId,
+    },
     /*
     NodeAdded {
         prev_hash: LogId,
@@ -51,9 +55,6 @@ pub enum MemberChange {
     NodeLost {
         prev_hash: LogId,
         lost_name: XorName,
-    },
-    SectionSplit {
-        prev_hash: LogId,
     },
     SectionMerge {
         /// Hash of previous block for lexicographically lesser section (P0).
@@ -70,6 +71,7 @@ impl MemberChange {
         match self {
             &MemberChange::InitialNode(_) => 10000,
             &MemberChange::StartPoint(_) => 9999,
+            &MemberChange::SectionSplit{..} => 5000,
         }
     }
 }
@@ -84,6 +86,8 @@ pub struct MemberEntry {
     pub id: LogId,
     // List of members after applying this change, sorted by name.
     // TODO: do we want to list all PublicIds in each entry?
+    // TODO: in the case of a split, this is all members _before_ the split, because we want the
+    // one entry to be agreed by the splitting section. Should we change something?
     pub members: SortedVec<PublicId>,
     // Change itself
     pub change: MemberChange,
@@ -134,24 +138,25 @@ impl MemberEntry {
     }
 
     // TODO: maybe return a Result<(), SomeError>
-    // TODO: remove allow(unused)
-    #[allow(unused)]
     fn is_successor_of(&self, prev_entry: &MemberEntry) -> bool {
         use self::MemberChange::*;
 
         // Check hash.
         match self.change {
-            InitialNode(..) => return false,
-            // StartPoint will never be appended after another entry
-            StartPoint(..) => return false,
+            InitialNode(..) | StartPoint(..) => {
+                warn!("{:?} MemberEntry::is_successor_of called on initial entry", self);
+                return false;
+            }
             /*
             NodeAdded { prev_hash, .. } |
             NodeLost { prev_hash, .. } |
-            SectionSplit { prev_hash, .. } => {
-                if prev_hash != prev_entry.id {
+            */
+            SectionSplit { prev_id, .. } => {
+                if prev_id != prev_entry.id {
                     return false;
                 }
             }
+            /*
             SectionMerge { left_hash, right_hash, .. } => {
                 let prev_hash = prev_entry.id;
                 if left_hash != prev_hash && right_hash != prev_hash {
@@ -209,17 +214,21 @@ impl MemberLog {
     }
 
     /// Try to append an entry to the log
-    //TODO: use
-    #[allow(unused)]
-    pub fn append(&mut self, block: MemberEntry) -> Result<()> {
-        if !block.is_successor_of(self.log.last().ok_or(MemberLogError::InvalidState)?) {
-            // Refuse to apply if hash doesn't match
-            return Err(MemberLogError::PrevIdMismatch);
+    pub fn append(&mut self, entry: MemberEntry) -> Option<&MemberEntry> {
+        if let Some(prev) = self.log.last() {
+            if !entry.is_successor_of(prev) {
+                // This is an error in our collective-agreement algorithm:
+                // TODO: if we have a problem here, we should try to re-sync the log
+                error!("{:?} Attempted to append an invalid successor to log (may not be recoverable).", self);
+                return None;
+            }
+        } else {
+            // This is a fatal code error, and probably going to happen again if rebooted.
+            panic!("{:?} Attempted to append to log before initialisation.", self);
         }
 
-        // TODO: check table checksum. (But we can't do any more than warn about errors?)
-        self.log.push(block);
-        Ok(())
+        self.log.push(entry);
+        self.log.last()
     }
 
     /// Get our public identifier
@@ -238,10 +247,10 @@ impl MemberLog {
         &mut self.table
     }
 
-    /// Return the last identifier in the log.
+    /// Return the last identifier in the log, or none if the log is entry.
     // TODO: I don't think we'll want this eventually. At least, check usages.
-    pub fn last_id(&self) -> Result<LogId> {
-        self.log.last().map(|entry| entry.id).ok_or(MemberLogError::InvalidState)
+    pub fn last_id(&self) -> Option<LogId> {
+        self.log.last().map(|entry| entry.id)
     }
 }
 

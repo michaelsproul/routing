@@ -149,8 +149,7 @@ mod tests {
             let routing_msg = RoutingMessage {
                 src: Authority::ClientManager(rand::random()),
                 dst: Authority::ClientManager(rand::random()),
-                content: MessageContent::SectionSplit(Prefix::new(0, rand::random()),
-                                                      rand::random()),
+                content: MessageContent::SectionSplit(Prefix::new(0, rand::random())),
             };
             let prefix = Prefix::new(0, *unwrap!(all_ids.iter().next()).name());
             let ssl = vec![SignedSectionList {

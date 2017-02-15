@@ -926,8 +926,9 @@ impl Node {
             (RoutingTableResponse { prefix, members, message_id },
              PrefixSection(_),
              ManagedNode(_)) => self.handle_rt_rsp(prefix, members, message_id, outbox),
-            (SectionSplit(prefix, joining_node), _, _) => {
-                self.handle_section_split(prefix, joining_node, outbox)
+            (SectionSplit(prefix), _, _) => {
+                self.handle_section_split(prefix, outbox);
+                Ok(())
             }
             (OwnSectionMerge(sections),
              PrefixSection(sender_prefix),
@@ -937,7 +938,7 @@ impl Node {
             (OtherSectionMerge(section), PrefixSection(merge_prefix), PrefixSection(_)) => {
                 self.handle_other_section_merge(merge_prefix, section, outbox)
             }
-            (MemberLog(entry), Section(_), Section(_)) => Ok(self.handle_log_entry(entry)),
+            (MemberLog(entry), Section(_), Section(_)) => Ok(self.handle_log_entry(entry, outbox)),
             (Ack(ack, _), _, _) => self.handle_ack_response(ack),
             (UserMessagePart { hash, part_count, part_index, payload, .. }, src, dst) => {
                 if let Some(msg) = self.user_msg_cache.add(hash, part_count, part_index, payload) {
@@ -1429,6 +1430,7 @@ impl Node {
                             peer_id: &PeerId,
                             outbox: &mut EventBox) {
         match self.peer_mgr.add_to_routing_table(public_id, peer_id) {
+            Ok(()) => {}
             Err(RoutingTableError::AlreadyExists) => return,  // already in RT
             Err(error) => {
                 debug!("{:?} Peer {:?} was not added to the routing table: {}",
@@ -1438,19 +1440,17 @@ impl Node {
                 self.disconnect_peer(peer_id);
                 return;
             }
-            Ok(true) => {
-                // i.e. the section should split
-                let our_prefix = *self.our_prefix();
-                // In the future we'll look to remove this restriction so we always call
-                // `send_section_split()` here and also check whether another round of splitting is
-                // required in `handle_section_split()` so splitting becomes recursive like merging.
-                if our_prefix.matches(public_id.name()) {
-                    self.send_section_split(our_prefix, *public_id.name());
-                }
+        }
+
+        if self.our_prefix().matches(public_id.name()) &&
+           self.peer_mgr.routing_table().we_should_split() {
+            match self.peer_mgr.make_split_entry() {
+                Ok(entry) => self.send_log_entry_to_section(entry),
+                Err(e) => error!("Failed to make split entry: {:?}", e),
             }
-            Ok(false) => {
-                self.merge_if_necessary();
-            }
+        } else {
+            // TODO: when exactly might we want to merge given an added node?
+            self.merge_if_necessary();
         }
 
         if self.peer_mgr.routing_table().our_section().contains(public_id.name()) {
@@ -2024,7 +2024,7 @@ impl Node {
                 break;
             }
             debug!("{:?} Splitting {:?} on section update.", self, rt_pfx);
-            let _ = self.handle_section_split(rt_pfx, rt_pfx.lower_bound(), outbox);
+            self.handle_section_split(rt_pfx, outbox);
         }
         // Filter list of members to just those we don't know about:
         let members =
@@ -2130,16 +2130,10 @@ impl Node {
         Ok(())
     }
 
-    fn handle_section_split(&mut self,
-                            prefix: Prefix<XorName>,
-                            joining_node: XorName,
-                            outbox: &mut EventBox)
-                            -> Result<(), RoutingError> {
+    // Called with our own prefix to perform a split and notify neighbours.
+    // Called with a neighbour's prefix just to update our routing table.
+    fn handle_section_split(&mut self, prefix: Prefix<XorName>, outbox: &mut EventBox) {
         let split_us = prefix == *self.our_prefix();
-        // Send SectionSplit notifications if we don't know of the new node yet
-        if split_us && !self.peer_mgr.routing_table().has(&joining_node) {
-            self.send_section_split(prefix, joining_node);
-        }
         // None of the `peers_to_drop` will have been in our section, so no need to notify Routing
         // user about them.
         let (peers_to_drop, our_new_prefix) = self.peer_mgr.split_section(prefix);
@@ -2158,17 +2152,26 @@ impl Node {
         self.merge_if_necessary();
 
         if split_us {
+            // Tell other sections about the split.
+            let src = Authority::Section(prefix.lower_bound());
+            let content = MessageContent::SectionSplit(prefix);
+            for other_pfx in self.peer_mgr.routing_table().prefixes() {
+                let dst = Authority::PrefixSection(other_pfx);
+                if let Err(err) = self.send_routing_message(src, dst, content.clone()) {
+                    debug!("{:?} Failed to send SectionSplit: {:?}.", self, err);
+                }
+            }
+            // TODO: this is redundant
             self.send_section_update();
         }
 
-        let prefix0 = prefix.pushed(false);
-        let prefix1 = prefix.pushed(true);
-        self.send_section_list_signature(prefix0, None);
-        self.send_section_list_signature(prefix1, None);
+        for new_prefix in vec![prefix.pushed(false), prefix.pushed(true)] {
+            if self.peer_mgr.routing_table().has_prefix(&new_prefix) {
+                self.send_section_list_signature(new_prefix, None);
+            }
+        }
 
         self.reset_rt_timer();
-
-        Ok(())
     }
 
     fn handle_own_section_merge(&mut self,
@@ -2434,9 +2437,23 @@ impl Node {
         }
     }
 
-    fn handle_log_entry(&mut self, entry: MemberEntry) {
+    fn handle_log_entry(&mut self, entry: MemberEntry, outbox: &mut EventBox) {
         self.reset_log_entry_timer();
-        self.peer_mgr.handle_log_entry(entry)
+        // We first match in PeerManager then match here too:
+        let need_split = if let Some(entry) = self.peer_mgr.handle_log_entry(entry) {
+            match entry.change {
+                MemberChange::InitialNode(_) |
+                MemberChange::StartPoint(_) => false,
+                MemberChange::SectionSplit { .. } => true,
+            }
+        } else {
+            false
+        };
+        // Unfortunately the lifetime lock from `self.peer_mgr` means we can't inline this:
+        if need_split {
+            let our_prefix = *self.our_prefix();
+            self.handle_section_split(our_prefix, outbox);
+        }
     }
 
     // returns: true iff we still want to send entry (presumably we did once)
@@ -2445,6 +2462,7 @@ impl Node {
             // should never be accumulated:
             MemberChange::InitialNode(_) |
             MemberChange::StartPoint(_) => false,
+            MemberChange::SectionSplit { .. } => self.peer_mgr.routing_table().we_should_split(),
         }
     }
 
@@ -2830,18 +2848,6 @@ impl Node {
         }
 
         true
-    }
-
-    fn send_section_split(&mut self, our_prefix: Prefix<XorName>, joining_node: XorName) {
-        for prefix in self.peer_mgr.routing_table().prefixes() {
-            // this way of calculating the source avoids using the joining node as the route
-            let src = Authority::Section(our_prefix.substituted_in(!joining_node));
-            let dst = Authority::PrefixSection(prefix);
-            let content = MessageContent::SectionSplit(our_prefix, joining_node);
-            if let Err(err) = self.send_routing_message(src, dst, content) {
-                debug!("{:?} Failed to send SectionSplit: {:?}.", self, err);
-            }
-        }
     }
 
     fn merge_if_necessary(&mut self) {
