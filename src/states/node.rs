@@ -760,29 +760,32 @@ impl Node {
                              hop_name: XorName,
                              sent_to: &BTreeSet<XorName>)
                              -> Result<(), RoutingError> {
-        let hop_prefix = self.peer_mgr
-            .routing_table()
-            .find_section_prefix(&hop_name)
-            .ok_or(RoutingTableError::NoSuchPeer)?;
-        let section_list = if signed_msg.routing_message().src.is_client() ||
-                              self.in_authority(&signed_msg.routing_message().src) {
-            // No point verifying the route if from a client; we also don't need to verify if the
-            // message is from our own section.
-            // TODO: possibly we should if the message is from a PrefixSection.
-            None
-        } else {
-            let list = self.section_list_sigs.get_signed_list(&hop_prefix);
-            if list.is_none() {
-                warn!("{:?} NoSectionSigInCache: sender {:?} of signed message {:?} to {:?} \
-                        via hop {:?} cannot be verified",
-                      self,
-                      signed_msg.routing_message().src,
-                      signed_msg.routing_message().content,
-                      signed_msg.routing_message().dst,
-                      hop_name);
-            }
-            list
-        };
+        // let hop_prefix = self.peer_mgr
+        //     .routing_table()
+        //     .find_section_prefix(&hop_name)
+        //     .ok_or(RoutingTableError::NoSuchPeer)?;
+        // let section_list = if signed_msg.routing_message().src.is_client() ||
+        //                       self.in_authority(&signed_msg.routing_message().src) {
+        //     // No point verifying the route if from a client; we also don't need to verify if the
+        //     // message is from our own section.
+        //     // TODO: possibly we should if the message is from a PrefixSection.
+        //     None
+        // } else {
+        //     let list = self.section_list_sigs.get_signed_list(&hop_prefix);
+        //     if list.is_none() {
+        //         warn!("{:?} NoSectionSigInCache: sender {:?} of signed message {:?} to {:?} \
+        //                 via hop {:?} cannot be verified",
+        //               self,
+        //               signed_msg.routing_message().src,
+        //               signed_msg.routing_message().content,
+        //               signed_msg.routing_message().dst,
+        //               hop_name);
+        //     }
+        //     list
+        // };
+        // TODO: enable signature collection / path verification.
+        use messages::SignedSectionList;
+        let section_list: Option<SignedSectionList> = None;
 
         // Check the message's signatures, and (if we have a section list) the sender.
         match signed_msg.check_integrity(self.min_section_size(),
