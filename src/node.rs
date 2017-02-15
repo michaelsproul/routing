@@ -430,11 +430,20 @@ impl EventStepper for Node {
     type Item = Event;
 
     fn produce_events(&mut self) -> Result<(), RecvError> {
+        #[cfg(feature = "use-mock-crust")]
+        self.tick_clock_and_send_timeouts();
+
         self.machine.step(&mut self.event_buffer)
     }
 
     fn try_produce_events(&mut self) -> Result<(), TryRecvError> {
-        self.machine.try_step(&mut self.event_buffer)
+        self.machine.try_step(&mut self.event_buffer)?;
+
+        // FIXME(michael) try this *before* stepping the machine
+        #[cfg(feature = "use-mock-crust")]
+        self.tick_clock_and_send_timeouts();
+
+        Ok(())
     }
 
     fn pop_item(&mut self) -> Option<Event> {
@@ -444,6 +453,25 @@ impl EventStepper for Node {
 
 #[cfg(feature = "use-mock-crust")]
 impl Node {
+    /// Advance the node's clock by 1 tick and pass any expired timeouts to the state machine.
+    pub fn tick_clock_and_send_timeouts(&mut self) {
+        let expired_tokens = match *self.machine.current_mut() {
+            State::Node(ref mut node) => node.tick_clock(),
+            ref state => {
+                trace!("No timeouts to fetch 'cause we're in {:?} state", state);
+                return;
+            },
+        };
+
+        for token in expired_tokens {
+            trace!("{:?} A timer expired with token: {}", self, token);
+            let machine = &mut self.machine;
+            let transition = machine.current_mut()
+                .handle_action(Action::Timeout(token), &mut self.event_buffer);
+            machine.apply_transition(transition, &mut self.event_buffer);
+        }
+    }
+
     /// Resend all unacknowledged messages.
     pub fn resend_unacknowledged(&mut self) -> bool {
         self.machine.current_mut().resend_unacknowledged()
@@ -502,7 +530,8 @@ impl Debug for Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        self.poll();
+        // FIXME(michael): leave this here?
+        // self.poll();
         let _ = self.machine.current_mut().handle_action(Action::Terminate, &mut self.event_buffer);
         let _ = self.event_buffer.take_all();
     }

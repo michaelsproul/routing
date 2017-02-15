@@ -141,6 +141,8 @@ extern crate resource_proof;
 extern crate rust_sodium;
 extern crate rustc_serialize;
 extern crate tiny_keccak;
+#[cfg(feature = "use-mock-crust")]
+extern crate wheel_timer;
 
 mod ack_manager;
 mod action;

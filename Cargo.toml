@@ -23,6 +23,7 @@ rustc-serialize = "~0.3.22"
 term = "~0.4.4"
 tiny-keccak = "~1.1.1"
 unwrap = "~1.1.0"
+wheel_timer = "0.3.1"
 
 [dev-dependencies]
 docopt = "~0.6.86"

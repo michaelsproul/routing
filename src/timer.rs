@@ -196,23 +196,42 @@ mod implementation {
 #[cfg(feature = "use-mock-crust")]
 mod implementation {
     use std::time::Duration;
+    use wheel_timer::WheelTimer;
 
     use types::RoutingActionSender;
 
-    // The mock timer currently never raises timeout events.
+    const TICKS_PER_SECOND: usize = 100;
+    const WHEEL_INTERVAL: usize = 60 * 60 * TICKS_PER_SECOND;
+
+    // The mock timer raises timeout events!
     pub struct Timer {
         next_token: u64,
+        timer: WheelTimer<u64>,
+    }
+
+    // TODO: work out an alright conversion rule.
+    fn duration_to_ticks(duration: Duration) -> usize {
+        duration.as_secs() as usize * TICKS_PER_SECOND
     }
 
     impl Timer {
         pub fn new(_: RoutingActionSender) -> Self {
-            Timer { next_token: 0 }
+            Timer { next_token: 0, timer: WheelTimer::new(WHEEL_INTERVAL) }
         }
 
-        pub fn schedule(&mut self, _: Duration) -> u64 {
+        pub fn schedule(&mut self, duration: Duration) -> u64 {
             let token = self.next_token;
+            let wait_time = duration_to_ticks(duration);
+            trace!("Scheduling a new timer to be available in {} ticks", wait_time);
+            self.timer.schedule(wait_time, token);
             self.next_token = token.wrapping_add(1);
             token
+        }
+
+        /// Advance the timer forward one click, returning the tokens for any timeouts
+        /// that expire as a result.
+        pub fn tick(&mut self) -> Vec<u64> {
+            self.timer.tick()
         }
     }
 }

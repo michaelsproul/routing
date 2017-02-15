@@ -2933,6 +2933,12 @@ impl Base for Node {
 
 #[cfg(feature = "use-mock-crust")]
 impl Node {
+    /// Tick the underlying clock.
+    pub fn tick_clock(&mut self) -> Vec<u64> {
+        trace!("Tick");
+        self.timer.tick()
+    }
+
     /// Routing table of this node.
     pub fn routing_table(&self) -> &RoutingTable<XorName> {
         self.peer_mgr.routing_table()
