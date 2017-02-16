@@ -2262,9 +2262,7 @@ impl Node {
     fn handle_timeout(&mut self, token: u64, outbox: &mut EventBox) -> bool {
         if self.get_approval_timer_token == Some(token) {
             return self.handle_approval_timeout(outbox);
-        }
-
-        if self.tick_timer_token == token {
+        } else if self.tick_timer_token == token {
             let tick_period = Duration::from_secs(TICK_TIMEOUT_SECS);
             self.tick_timer_token = self.timer.schedule(tick_period);
 
@@ -2275,24 +2273,17 @@ impl Node {
             self.merge_if_necessary();
 
             outbox.send_event(Event::Tick);
-            return true;
-        }
-
-        if self.rt_timer_token == Some(token) {
+        } else if self.rt_timer_token == Some(token) {
             self.rt_timeout = cmp::min(Duration::from_secs(RT_MAX_TIMEOUT_SECS),
                                        self.rt_timeout * 2);
             trace!("{:?} Scheduling next RT request for {} seconds from now.",
                    self,
                    self.rt_timeout.as_secs());
             self.rt_timer_token = Some(self.timer.schedule(self.rt_timeout));
-            if self.send_rt_request().is_err() {
-                return true;
-            }
+            self.send_rt_request().is_err();
         } else if self.candidate_timer_token == Some(token) {
             self.candidate_timer_token = None;
-            if self.send_candidate_approval().is_err() {
-                return true;
-            }
+            self.send_candidate_approval().is_err();
         } else if self.candidate_status_token == Some(token) {
             self.candidate_status_token = Some(self.timer
                 .schedule(Duration::from_secs(CANDIDATE_STATUS_INTERVAL_SECS)));
@@ -2318,9 +2309,9 @@ impl Node {
                   APPROVAL_TIMEOUT_SECS);
         } else if self.log_entry_timeout_token == Some(token) {
             self.reset_log_entry_timer();
+        } else {
+            self.resend_unacknowledged_timed_out_msgs(token);
         }
-
-        self.resend_unacknowledged_timed_out_msgs(token);
 
         true
     }
