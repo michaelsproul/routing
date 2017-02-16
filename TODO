@@ -1,0 +1,6 @@
+Replace many uses of peer_mgr with route_mgr in states::Node
+Are there many uses of peer_mgr left?
+
+Fix compile
+(tests are broken anyway — some ran for a couple hours before I killed them earlier)
+
