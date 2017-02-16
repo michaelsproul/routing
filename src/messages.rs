@@ -30,7 +30,7 @@ use maidsafe_utilities::serialisation::{deserialise, serialise};
 use member_log::{LogId, MemberEntry};
 #[cfg(feature = "use-mock-crust")]
 use mock_crust::crust::PeerId;
-use peer_manager::SectionMap;
+use route_manager::SectionMap;
 use routing_table::{Prefix, Xorable};
 use routing_table::Authority;
 use rust_sodium::crypto::{box_, sign};

@@ -33,10 +33,10 @@ use messages::{ConnectionInfo, DEFAULT_PRIORITY, DirectMessage, HopMessage, MAX_
                MessageContent, RoutingMessage, SectionList, SignedMessage, UserMessage,
                UserMessageCache};
 use outbox::EventBox;
-use peer_manager::{ConnectionInfoPreparedResult, PeerManager, PeerState,
-                   RESOURCE_PROOF_DURATION_SECS, SectionMap};
+use peer_manager::{ConnectionInfoPreparedResult, PeerManager, PeerState};
 use rand::{self, Rng};
 use resource_proof::ResourceProof;
+use route_manager::{RESOURCE_PROOF_DURATION_SECS, RouteManager, SectionMap};
 use routing_message_filter::{FilteringResult, RoutingMessageFilter};
 use routing_table::{Authority, OtherMergeDetails, OwnMergeState, Prefix, RemovalDetails, Xorable};
 use routing_table::Error as RoutingTableError;
@@ -1411,6 +1411,7 @@ impl Node {
                             public_id: &PublicId,
                             peer_id: &PeerId,
                             outbox: &mut EventBox) {
+        self.peer_mgr.set_to_full_node(pub_id, peer_id);
         match self.peer_mgr.add_to_routing_table(public_id, peer_id) {
             Ok(()) => {}
             Err(RoutingTableError::AlreadyExists) => return,  // already in RT
@@ -1787,13 +1788,17 @@ impl Node {
             debug!("{:?} Disconnecting {:?} (indirect).", self, peer_id);
             let message = DirectMessage::TunnelDisconnect(*peer_id);
             self.send_direct_message(tunnel_id, message);
-            let _ = self.peer_mgr.remove_peer(peer_id);
+            if let Some(peer) = self.peer_mgr.remove_peer(peer_id) {
+                let _ = self.route_mgr.remove_node(peer.name());
+            }
         } else {
             debug!("{:?} Disconnecting {:?}. Calling crust::Service::disconnect.",
                    self,
                    peer_id);
             let _ = self.crust_service.disconnect(*peer_id);
-            let _ = self.peer_mgr.remove_peer(peer_id);
+            if let Some(peer) = self.peer_mgr.remove_peer(peer_id) {
+                let _ = self.route_mgr.remove_node(peer.name());
+            }
         }
     }
 
@@ -2245,6 +2250,7 @@ impl Node {
                 debug!("{:?} Disconnecting from timed out peer {:?}", self, peer_id);
                 let _ = self.crust_service.disconnect(peer_id);
             }
+            self.route_mgr.remove_expired_expected();
             self.merge_if_necessary();
 
             outbox.send_event(Event::Tick);
@@ -2745,12 +2751,12 @@ impl Node {
     // Handle dropped peer with the given peer id. Returns true if we should keep running, false if
     // we should terminate.
     fn dropped_peer(&mut self, peer_id: &PeerId, outbox: &mut EventBox) -> bool {
-        let (peer, removal_result) = match self.peer_mgr.remove_peer(peer_id) {
-            Some(result) => result,
+        let peer = match self.peer_mgr.remove_peer(peer_id) {
+            Some(peer) => peer,
             None => return true,
         };
 
-        if let Ok(removal_details) = removal_result {
+        if let Ok(removal_details) = self.route_mgr.remove_node(peer.name()) {
             if !self.dropped_routing_node(peer.pub_id(), removal_details, outbox) {
                 return false;
             }
