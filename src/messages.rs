@@ -553,6 +553,19 @@ impl RoutingMessage {
     }
 }
 
+/// Connection info details
+#[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash, RustcEncodable, RustcDecodable)]
+pub struct ConnectionInfo {
+    /// Encrypted Crust connection info.
+    pub encrypted_info: Vec<u8>,
+    /// Nonce used to provide a salt in the encrypted message.
+    pub nonce: [u8; box_::NONCEBYTES],
+    /// The sender's public ID.
+    pub pub_id: PublicId,
+    /// The message's unique identifier.
+    pub msg_id: MessageId,
+}
+
 /// The routing message types
 ///
 /// # The bootstrap process
@@ -634,28 +647,10 @@ pub enum MessageContent {
     },
     /// Send our Crust connection info encrypted to a node we wish to connect to and for which we
     /// have the keys.
-    ConnectionInfoRequest {
-        /// Encrypted Crust connection info.
-        encrypted_conn_info: Vec<u8>,
-        /// Nonce used to provide a salt in the encrypted message.
-        nonce: [u8; box_::NONCEBYTES],
-        /// The sender's public ID.
-        pub_id: PublicId,
-        /// The message's unique identifier.
-        msg_id: MessageId,
-    },
+    ConnectionInfoRequest(ConnectionInfo),
     /// Respond to a `ConnectionInfoRequest` with our Crust connection info encrypted to the
     /// requester.
-    ConnectionInfoResponse {
-        /// Encrypted Crust connection info.
-        encrypted_conn_info: Vec<u8>,
-        /// Nonce used to provide a salt in the encrypted message.
-        nonce: [u8; box_::NONCEBYTES],
-        /// The sender's public ID.
-        pub_id: PublicId,
-        /// The message's unique identifier.
-        msg_id: MessageId,
-    },
+    ConnectionInfoResponse(ConnectionInfo),
     /// Reply with the new `PublicId` for the joining node.
     ///
     /// Sent from the `NodeManager` to the `Client`.
@@ -850,17 +845,17 @@ impl Debug for MessageContent {
                        client_auth,
                        message_id)
             }
-            ConnectionInfoRequest { ref pub_id, ref msg_id, .. } => {
+            ConnectionInfoRequest(ref info) => {
                 write!(formatter,
-                       "ConnectionInfoRequest {{ {:?}, {:?}, .. }}",
-                       pub_id,
-                       msg_id)
+                       "ConnectionInfoRequest{{ {:?}, {:?}, .. }}",
+                       info.pub_id,
+                       info.msg_id)
             }
-            ConnectionInfoResponse { ref pub_id, ref msg_id, .. } => {
+            ConnectionInfoResponse(ref info) => {
                 write!(formatter,
                        "ConnectionInfoResponse {{ {:?}, {:?}, .. }}",
-                       pub_id,
-                       msg_id)
+                       info.pub_id,
+                       info.msg_id)
             }
             GetNodeNameResponse { ref relocated_id, ref log_id, ref members, ref message_id } => {
                 write!(formatter,

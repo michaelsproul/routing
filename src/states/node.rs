@@ -29,8 +29,9 @@ use itertools::Itertools;
 use log::LogLevel;
 use maidsafe_utilities::serialisation;
 use member_log::{LogId, MemberChange, MemberEntry, MemberLog};
-use messages::{DEFAULT_PRIORITY, DirectMessage, HopMessage, MAX_PART_LEN, Message, MessageContent,
-               RoutingMessage, SectionList, SignedMessage, UserMessage, UserMessageCache};
+use messages::{ConnectionInfo, DEFAULT_PRIORITY, DirectMessage, HopMessage, MAX_PART_LEN, Message,
+               MessageContent, RoutingMessage, SectionList, SignedMessage, UserMessage,
+               UserMessageCache};
 use outbox::EventBox;
 use peer_manager::{ConnectionInfoPreparedResult, PeerManager, PeerState,
                    RESOURCE_PROOF_DURATION_SECS, SectionMap};
@@ -884,32 +885,13 @@ impl Node {
             (AcceptAsCandidate { expect_id, client_auth, message_id }, Section(_), Section(_)) => {
                 self.handle_accept_as_candidate(expect_id, client_auth, message_id)
             }
-            (ConnectionInfoRequest { encrypted_conn_info, nonce, pub_id, msg_id },
-             src @ Client { .. },
-             dst @ ManagedNode(_)) |
-            (ConnectionInfoRequest { encrypted_conn_info, nonce, pub_id, msg_id },
-             src @ ManagedNode(_),
-             dst @ ManagedNode(_)) => {
-                self.handle_connection_info_request(encrypted_conn_info,
-                                                    nonce,
-                                                    pub_id,
-                                                    msg_id,
-                                                    src,
-                                                    dst,
-                                                    outbox)
+            (ConnectionInfoRequest(conn_info), src @ Client { .. }, dst @ ManagedNode(_)) |
+            (ConnectionInfoRequest(conn_info), src @ ManagedNode(_), dst @ ManagedNode(_)) => {
+                self.handle_connection_info_request(conn_info, src, dst, outbox)
             }
-            (ConnectionInfoResponse { encrypted_conn_info, nonce, pub_id, msg_id },
-             ManagedNode(src_name),
-             dst @ Client { .. }) |
-            (ConnectionInfoResponse { encrypted_conn_info, nonce, pub_id, msg_id },
-             ManagedNode(src_name),
-             dst @ ManagedNode(_)) => {
-                self.handle_connection_info_response(encrypted_conn_info,
-                                                     nonce,
-                                                     pub_id,
-                                                     msg_id,
-                                                     src_name,
-                                                     dst)
+            (ConnectionInfoResponse(conn_info), ManagedNode(src_name), dst @ Client { .. }) |
+            (ConnectionInfoResponse(conn_info), ManagedNode(src_name), dst @ ManagedNode(_)) => {
+                self.handle_connection_info_response(conn_info, src_name, dst)
             }
             (CandidateApproval { candidate_id, client_auth, sections }, Section(_), Section(_)) => {
                 self.handle_candidate_approval(candidate_id, client_auth, sections, outbox)
@@ -1546,20 +1528,16 @@ impl Node {
                                              &nonce,
                                              their_pub_id.encrypting_public_key(),
                                              self.full_id().encrypting_private_key());
-        let msg_content = if let Some(msg_id) = msg_id {
-            MessageContent::ConnectionInfoResponse {
-                encrypted_conn_info: encrypted_conn_info,
-                nonce: nonce.0,
-                pub_id: *self.full_id().public_id(),
-                msg_id: msg_id,
-            }
+        let conn_info = ConnectionInfo {
+            encrypted_info: encrypted_conn_info,
+            nonce: nonce.0,
+            pub_id: *self.full_id().public_id(),
+            msg_id: msg_id.unwrap_or_else(MessageId::new),
+        };
+        let msg_content = if msg_id.is_some() {
+            MessageContent::ConnectionInfoResponse(conn_info)
         } else {
-            MessageContent::ConnectionInfoRequest {
-                encrypted_conn_info: encrypted_conn_info,
-                nonce: nonce.0,
-                pub_id: *self.full_id().public_id(),
-                msg_id: MessageId::new(),
-            }
+            MessageContent::ConnectionInfoRequest(conn_info)
         };
 
         if let Err(err) = self.send_routing_message(src, dst, msg_content) {
@@ -1624,40 +1602,40 @@ impl Node {
         }
     }
 
-    #[cfg_attr(feature="cargo-clippy", allow(too_many_arguments))]
     fn handle_connection_info_request(&mut self,
-                                      encrypted_connection_info: Vec<u8>,
-                                      nonce_bytes: [u8; box_::NONCEBYTES],
-                                      public_id: PublicId,
-                                      message_id: MessageId,
+                                      conn_info: ConnectionInfo,
                                       src: Authority<XorName>,
                                       dst: Authority<XorName>,
                                       outbox: &mut EventBox)
                                       -> Result<(), RoutingError> {
         let name = match src {
-            Authority::Client { .. } => public_id.name(),
+            Authority::Client { .. } => conn_info.pub_id.name(),
             Authority::ManagedNode(ref name) => name,
             _ => unreachable!(),
         };
         self.peer_mgr.allow_connect(name)?;
-        let their_connection_info = self.decrypt_connection_info(&encrypted_connection_info,
-                                     &box_::Nonce(nonce_bytes),
-                                     &public_id)?;
+        let their_connection_info = self.decrypt_connection_info(&conn_info.encrypted_info,
+                                     &box_::Nonce(conn_info.nonce),
+                                     &conn_info.pub_id)?;
         let peer_id = their_connection_info.id();
         use peer_manager::ConnectionInfoReceivedResult::*;
         match self.peer_mgr
-            .connection_info_received(src, dst, public_id, their_connection_info, message_id) {
+            .connection_info_received(src,
+                                      dst,
+                                      conn_info.pub_id,
+                                      their_connection_info,
+                                      conn_info.msg_id) {
             Ok(Ready(our_info, their_info)) => {
                 debug!("{:?} Already sent a connection info request to {:?} ({:?}); resending \
                         our same details as a response.",
                        self,
-                       public_id.name(),
+                       conn_info.pub_id.name(),
                        peer_id);
                 self.send_connection_info(our_info.to_pub_connection_info(),
-                                          public_id,
+                                          conn_info.pub_id,
                                           dst,
                                           src,
-                                          Some(message_id));
+                                          Some(conn_info.msg_id));
                 if let Err(error) = self.crust_service.connect(our_info, their_info) {
                     trace!("{:?} Unable to connect to {:?} - {:?}", self, src, error);
                 }
@@ -1669,7 +1647,7 @@ impl Node {
             Ok(IsClient) |
             Ok(IsJoiningNode) => {
                 self.send_node_identify(peer_id);
-                self.handle_node_identify(public_id, peer_id, outbox);
+                self.handle_node_identify(conn_info.pub_id, peer_id, outbox);
             }
             Ok(Waiting) | Ok(IsConnected) | Err(_) => (),
         }
@@ -1677,34 +1655,31 @@ impl Node {
     }
 
     fn handle_connection_info_response(&mut self,
-                                       encrypted_connection_info: Vec<u8>,
-                                       nonce_bytes: [u8; box_::NONCEBYTES],
-                                       public_id: PublicId,
-                                       message_id: MessageId,
+                                       conn_info: ConnectionInfo,
                                        src: XorName,
                                        dst: Authority<XorName>)
                                        -> Result<(), RoutingError> {
         self.peer_mgr.allow_connect(&src)?;
-        let their_connection_info = self.decrypt_connection_info(&encrypted_connection_info,
-                                     &box_::Nonce(nonce_bytes),
-                                     &public_id)?;
+        let their_connection_info = self.decrypt_connection_info(&conn_info.encrypted_info,
+                                     &box_::Nonce(conn_info.nonce),
+                                     &conn_info.pub_id)?;
         let peer_id = their_connection_info.id();
         use peer_manager::ConnectionInfoReceivedResult::*;
         match self.peer_mgr
             .connection_info_received(Authority::ManagedNode(src),
                                       dst,
-                                      public_id,
+                                      conn_info.pub_id,
                                       their_connection_info,
-                                      message_id) {
+                                      conn_info.msg_id) {
             Ok(Ready(our_info, their_info)) => {
                 trace!("{:?} Received connection info response. Trying to connect to {:?} ({:?}).",
                        self,
-                       public_id.name(),
+                       conn_info.pub_id.name(),
                        peer_id);
                 if let Err(error) = self.crust_service.connect(our_info, their_info) {
                     debug!("{:?} Crust failed initiating a connection to  {:?} ({:?}): {:?}",
                            self,
-                           public_id.name(),
+                           conn_info.pub_id.name(),
                            peer_id,
                            error);
                 }
@@ -1716,14 +1691,14 @@ impl Node {
                 debug!("{:?} Received connection info response from {:?} ({:?}) when we haven't \
                       sent a corresponding request",
                        self,
-                       public_id.name(),
+                       conn_info.pub_id.name(),
                        peer_id);
             }
             Ok(Waiting) | Ok(IsConnected) => (),
             Err(error) => {
                 warn!("{:?} Failed to insert connection info from {:?} ({:?}): {:?}",
                       self,
-                      public_id.name(),
+                      conn_info.pub_id.name(),
                       peer_id,
                       error)
             }
@@ -2639,9 +2614,9 @@ impl Node {
                    sent_to: &BTreeSet<XorName>)
                    -> Result<(BTreeSet<XorName>, Vec<PeerId>), RoutingError> {
         let force_via_proxy = match routing_msg.content {
-            MessageContent::ConnectionInfoRequest { pub_id, .. } |
-            MessageContent::ConnectionInfoResponse { pub_id, .. } => {
-                routing_msg.src.is_client() && pub_id == *self.full_id.public_id()
+            MessageContent::ConnectionInfoRequest(ref conn_info) |
+            MessageContent::ConnectionInfoResponse(ref conn_info) => {
+                routing_msg.src.is_client() && conn_info.pub_id == *self.full_id.public_id()
             }
             _ => false,
         };
