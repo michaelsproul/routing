@@ -89,7 +89,7 @@ fn failing_connections_ring() {
 
 #[test]
 fn failing_connections_bidirectional() {
-    let min_section_size = 4;
+    let min_section_size = 5;
     let network = Network::new(min_section_size, None);
     network.block_connection(Endpoint(2), Endpoint(3));
     network.block_connection(Endpoint(3), Endpoint(2));
