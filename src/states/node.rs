@@ -147,7 +147,7 @@ impl Node {
         let name = XorName(sha256::hash(&full_id.public_id().name().0).0);
         full_id.public_id_mut().set_name(name);
         assert!(min_section_size >= MAX_ROUTES as usize);
-        let log = MemberLog::new_first(full_id.public_id().clone(), min_section_size);
+        let log = MemberLog::new_first(*full_id.public_id(), min_section_size);
 
         let mut node = Self::new(cache,
                                  crust_service,
@@ -180,7 +180,7 @@ impl Node {
                               timer: Timer)
                               -> Option<Self> {
         assert!(min_section_size >= MAX_ROUTES as usize);
-        let log = MemberLog::new_empty(full_id.public_id().clone(), min_section_size);
+        let log = MemberLog::new_empty(*full_id.public_id(), min_section_size);
         let mut node = Self::new(cache, crust_service, false, full_id, log, stats, timer);
 
         let _ = node.peer_mgr.set_proxy(proxy_peer_id, proxy_public_id);
@@ -2165,6 +2165,8 @@ impl Node {
             self.send_section_update();
         }
 
+        // Clippy 0.0.104 is wrong since it is not possible to _move_ values out of an array.
+        #[cfg_attr(feature="cargo-clippy", allow(useless_vec))]
         for new_prefix in vec![prefix.pushed(false), prefix.pushed(true)] {
             if self.peer_mgr.routing_table().has_prefix(&new_prefix) {
                 self.send_section_list_signature(new_prefix, None);

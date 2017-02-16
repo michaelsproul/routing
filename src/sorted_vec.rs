@@ -28,7 +28,8 @@ use std::vec;
 /// A sorted Vec type.
 ///
 /// This is useful where you want a Vec which is guaranteed to be sorted.
-#[derive(Clone, Debug, Default, PartialOrd, Ord, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, Default, PartialOrd, Ord, PartialEq, Eq, Hash, RustcEncodable,
+    RustcDecodable)]
 pub struct SortedVec<T: Ord> {
     v: Vec<T>,
 }
@@ -72,14 +73,6 @@ impl<T: Ord> FromIterator<T> for SortedVec<T> {
         let mut v = Vec::from_iter(iter);
         v.sort();
         SortedVec { v: v }
-    }
-}
-
-impl<T: Ord + Hash> Hash for SortedVec<T> {
-    fn hash<H>(&self, state: &mut H)
-        where H: Hasher
-    {
-        self.v.hash(state)
     }
 }
 

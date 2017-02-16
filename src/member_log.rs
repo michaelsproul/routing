@@ -23,16 +23,12 @@ use maidsafe_utilities::serialisation::serialise;
 use routing_table::RoutingTable;
 use rust_sodium::crypto::hash::sha256;
 use std::fmt;
-use std::result;
 use xor_name::XorName;
 use std::cmp::Ordering;
 
 /// We use this to identify log entries.
 //TODO: why are we using SHA256?
 pub type LogId = sha256::Digest;
-
-/// Internal result type
-pub type Result<T> = result::Result<T, MemberLogError>;
 
 /// What happened in a change
 #[derive(Clone, Debug, RustcEncodable, RustcDecodable, Eq, PartialEq, Hash)]
@@ -68,10 +64,10 @@ pub enum MemberChange {
 impl MemberChange {
     // higher value is higher priority, equal only if types are equal
     fn priority(&self) -> u32 {
-        match self {
-            &MemberChange::InitialNode(_) => 10000,
-            &MemberChange::StartPoint(_) => 9999,
-            &MemberChange::SectionSplit{..} => 5000,
+        match *self {
+            MemberChange::InitialNode(_) => 10000,
+            MemberChange::StartPoint(_) => 9999,
+            MemberChange::SectionSplit{..} => 5000,
         }
     }
 }
