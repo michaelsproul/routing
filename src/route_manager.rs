@@ -240,7 +240,7 @@ impl RouteManager {
                 .iter()
                 .find(|&(_, cand)| cand.passed_our_challenge && !cand.is_approved()) {
             return if let Some(pub_id) = peer_mgr.get_pub_id(name) {
-                Ok((*pub_id, candidate.client_auth, self.pub_ids_by_section()))
+                Ok((*pub_id, candidate.client_auth, self.pub_ids_by_section(peer_mgr)))
             } else {
                 Err(RoutingError::UnknownCandidate)
             };
@@ -293,7 +293,7 @@ impl RouteManager {
     /// * Err(CandidateIsTunnelling)    if the peer is tunnelling
     /// * Err(UnknownCandidate)         if the peer is not in the candidate list
     pub fn handle_candidate_identify(&mut self,
-                                     peer_mgr: &PeerManager,
+                                     peer_mgr: &mut PeerManager,
                                      pub_id: &PublicId,
                                      peer_id: &PeerId,
                                      target_size: usize,
@@ -381,7 +381,7 @@ impl RouteManager {
     /// `opt_prefix` is the new prefix for our section in the case we split our own section, or
     /// `None` in the case we split a different section.
     pub fn split_section(&mut self,
-                         peer_mgr: &PeerManager,
+                         peer_mgr: &mut PeerManager,
                          prefix: Prefix<XorName>)
                          -> (Vec<(XorName, PeerId)>, Option<Prefix<XorName>>) {
         let (names_to_drop, our_new_prefix) = self.log.table_mut().split(prefix);
@@ -456,7 +456,7 @@ impl RouteManager {
                              merge_prefix: Prefix<XorName>,
                              sections: SectionMap)
                              -> (OwnMergeState<XorName>, Vec<PublicId>) {
-        self.remove_expired();
+        // FIXME: self.remove_expired();
         let needed = sections.iter()
             .flat_map(|(_, pub_ids)| pub_ids)
             .filter(|pub_id| !self.log.table().has(pub_id.name()))
@@ -491,7 +491,7 @@ impl RouteManager {
                                prefix: Prefix<XorName>,
                                section: BTreeSet<PublicId>)
                                -> HashSet<PublicId> {
-        self.remove_expired();
+        // FIXME: self.remove_expired();
 
         let merge_details = OtherMergeDetails {
             prefix: prefix,
@@ -516,12 +516,12 @@ impl RouteManager {
     }
 
     /// Removes expired candidates and returns the list of peers from which we should disconnect.
-    pub fn remove_expired_candidates(&mut self) -> Vec<PeerId> {
+    pub fn remove_expired_candidates(&mut self, peer_mgr: &PeerManager) -> Vec<PeerId> {
         let candidates = mem::replace(&mut self.candidates, HashMap::new());
         let (to_prune, to_keep) = candidates.into_iter()
             .partition(|&(_, ref candidate)| candidate.is_expired());
         self.candidates = to_keep;
-        to_prune.into_iter().filter_map(|(name, _)| self.get_peer_id(&name).cloned()).collect()
+        to_prune.into_iter().filter_map(|(name, _)| peer_mgr.get_peer_id(&name).cloned()).collect()
     }
 
     /// Returns the public IDs of all routing table entries, sorted by section.
@@ -552,11 +552,11 @@ impl RouteManager {
     }
 
     /// Make a log entry to split
-    pub fn make_split_entry(&self) -> Result<MemberEntry, RoutingError> {
+    pub fn make_split_entry(&self, peer_mgr: &PeerManager) -> Result<MemberEntry, RoutingError> {
         let change = MemberChange::SectionSplit {
             prev_id: self.log.last_id().ok_or(MemberLogError::InvalidState)?,
         };
-        Ok(MemberEntry::new(self.get_current_members(), change))
+        Ok(MemberEntry::new(self.get_current_members(peer_mgr), change))
     }
 
     /// Removes timed out expected peers (those we tried to connect to).

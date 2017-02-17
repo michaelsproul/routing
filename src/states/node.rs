@@ -471,7 +471,7 @@ impl Node {
     }
 
     fn find_tunnel_for_peer(&mut self, peer_id: PeerId, pub_id: &PublicId) {
-        for (name, dst_peer_id) in self.peer_mgr.set_searching_for_tunnel(peer_id, *pub_id, self.routing_table()) {
+        for (name, dst_peer_id) in self.peer_mgr.set_searching_for_tunnel(peer_id, *pub_id, self.route_mgr.routing_table()) {
             trace!("{:?} Asking {:?} to serve as a tunnel for {:?}.",
                    self,
                    name,
@@ -669,7 +669,7 @@ impl Node {
                                              *self.full_id.public_id(),
                                              section.clone(),
                                              sig,
-                                             self.routing_table().our_section().len());
+                                             self.route_mgr.routing_table().our_section().len());
 
         // this defines whom we are sending signature to: our section if dst is None, or given
         // name if it's Some
@@ -705,7 +705,7 @@ impl Node {
                                *src_pub_id,
                                section_list,
                                sig,
-                               self.routing_table().our_section().len());
+                               self.route_mgr.routing_table().our_section().len());
             Ok(())
         } else {
             Err(RoutingError::FailedSignature)
@@ -957,7 +957,7 @@ impl Node {
                                  sections: SectionMap,
                                  outbox: &mut EventBox)
                                  -> Result<(), RoutingError> {
-        for peer_id in self.route_mgr.remove_expired_candidates() {
+        for peer_id in self.route_mgr.remove_expired_candidates(&self.peer_mgr) {
             self.disconnect_peer(&peer_id);
         }
 
@@ -1382,7 +1382,7 @@ impl Node {
         } else {
             rand::thread_rng().gen_iter().take(10).collect()
         };
-        match self.route_mgr.handle_candidate_identify(&self.peer_mgr,
+        match self.route_mgr.handle_candidate_identify(&mut self.peer_mgr,
                                                       &public_id,
                                                       &peer_id,
                                                       target_size,
@@ -1439,7 +1439,7 @@ impl Node {
 
         if self.our_prefix().matches(public_id.name()) &&
            self.routing_table().we_should_split() {
-            match self.route_mgr.make_split_entry() {
+            match self.route_mgr.make_split_entry(&self.peer_mgr) {
                 Ok(entry) => self.send_log_entry_to_section(entry),
                 Err(e) => error!("Failed to make split entry: {:?}", e),
             }
@@ -1920,7 +1920,7 @@ impl Node {
             return Ok(());
         }
 
-        for peer_id in self.route_mgr.remove_expired_candidates() {
+        for peer_id in self.route_mgr.remove_expired_candidates(&self.peer_mgr) {
             self.disconnect_peer(&peer_id);
         }
 
@@ -1966,7 +1966,7 @@ impl Node {
                                   client_auth: Authority<XorName>,
                                   message_id: MessageId)
                                   -> Result<(), RoutingError> {
-        for peer_id in self.route_mgr.remove_expired_candidates() {
+        for peer_id in self.route_mgr.remove_expired_candidates(&self.peer_mgr) {
             self.disconnect_peer(&peer_id);
         }
 
@@ -2055,7 +2055,7 @@ impl Node {
                      src: Authority<XorName>,
                      dst: Authority<XorName>)
                      -> Result<(), RoutingError> {
-        let sections = self.route_mgr.pub_ids_by_section();
+        let sections = self.route_mgr.pub_ids_by_section(&self.peer_mgr);
         let serialised_sections = serialisation::serialise(&sections)?;
         if digest == sha256::hash(&serialised_sections) {
             return Ok(());
@@ -2128,7 +2128,7 @@ impl Node {
         let split_us = prefix == *self.our_prefix();
         // None of the `peers_to_drop` will have been in our section, so no need to notify Routing
         // user about them.
-        let (peers_to_drop, our_new_prefix) = self.route_mgr.split_section(&self.peer_mgr, prefix);
+        let (peers_to_drop, our_new_prefix) = self.route_mgr.split_section(&mut self.peer_mgr, prefix);
         if let Some(new_prefix) = our_new_prefix {
             outbox.send_event(Event::SectionSplit(new_prefix));
         }
@@ -2343,7 +2343,7 @@ impl Node {
         if self.is_approved {
             let msg_id = MessageId::new();
             self.rt_msg_id = Some(msg_id);
-            let sections = self.route_mgr.pub_ids_by_section();
+            let sections = self.route_mgr.pub_ids_by_section(&self.peer_mgr);
             let digest = sha256::hash(&serialisation::serialise(&sections)?);
             trace!("{:?} Sending RT request {:?} with digest {:?}",
                    self,
@@ -2818,7 +2818,7 @@ impl Node {
         if details.was_in_our_section {
             self.reset_rt_timer();
             self.section_list_sigs
-                .remove_signatures_by(pub_id, self.routing_table().our_section().len());
+                .remove_signatures_by(pub_id, self.route_mgr.routing_table().our_section().len());
         }
 
         if self.routing_table().is_empty() {
@@ -2833,7 +2833,7 @@ impl Node {
     }
 
     fn merge_if_necessary(&mut self) {
-        if let Some((sender_prefix, merge_prefix, sections)) = self.route_mgr.should_merge() {
+        if let Some((sender_prefix, merge_prefix, sections)) = self.route_mgr.should_merge(&self.peer_mgr) {
             let content = MessageContent::OwnSectionMerge(sections);
             let src = Authority::PrefixSection(sender_prefix);
             let dst = Authority::PrefixSection(merge_prefix);
