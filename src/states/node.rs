@@ -1591,10 +1591,7 @@ impl Node {
                             public_id: &PublicId,
                             peer_id: &PeerId,
                             outbox: &mut EventBox) {
-        let want_to_merge = self.we_want_to_merge() || self.they_want_to_merge();
-        let mut need_split = false;
-        match self.peer_mgr
-                  .add_to_routing_table(public_id, peer_id, want_to_merge) {
+        match self.peer_mgr.add_to_routing_table(public_id, peer_id) {
             Err(RoutingTableError::AlreadyExists) => return,  // already in RT
             Err(error) => {
                 debug!("{:?} Peer {:?} was not added to the routing table: {}",
@@ -1604,20 +1601,22 @@ impl Node {
                 self.disconnect_peer(peer_id, Some(outbox));
                 return;
             }
-            Ok(true) => {
-                // i.e. the section should split
-                let our_prefix = *self.our_prefix();
-                // In the future we'll look to remove this restriction so we always call
-                // `send_section_split()` here and also check whether another round of splitting is
-                // required in `handle_section_split()` so splitting becomes recursive like merging.
-                if our_prefix.matches(public_id.name()) {
-                    need_split = true;
-                    self.send_section_split(our_prefix, *public_id.name());
-                }
+            Ok(()) => (),
+        }
+        let mut need_split = false;
+        if !self.we_want_to_merge() && !self.they_want_to_merge() &&
+           self.peer_mgr.routing_table().should_split() {
+            // i.e. the section should split
+            let our_prefix = *self.our_prefix();
+            // In the future we'll look to remove this restriction so we always call
+            // `send_section_split()` here and also check whether another round of splitting is
+            // required in `handle_section_split()` so splitting becomes recursive like merging.
+            if our_prefix.matches(public_id.name()) {
+                self.send_section_split(our_prefix, *public_id.name());
+                need_split = true;
             }
-            Ok(false) => {
-                self.merge_if_necessary();
-            }
+        } else {
+            self.merge_if_necessary();
         }
 
         if self.peer_mgr
@@ -2280,8 +2279,8 @@ impl Node {
             members.into_iter().filter(f).collect_vec()
         } else {
             debug!("{:?} Section update received from unknown neighbour {:?}",
-                       self,
-                       prefix);
+                   self,
+                   prefix);
             return Ok(());
         };
         let members = members
@@ -3229,9 +3228,8 @@ impl Node {
     }
 
     fn merge_if_necessary(&mut self) {
-        if let Some((sender_prefix, merge_prefix, sections)) =
-            self.peer_mgr
-                .should_merge(self.we_want_to_merge(), self.they_want_to_merge()) {
+        if !self.we_want_to_merge() && (self.they_want_to_merge() || self.peer_mgr.should_merge()) {
+            let (sender_prefix, merge_prefix, sections) = self.peer_mgr.merge_details();
             let content = MessageContent::OwnSectionMerge(sections);
             let src = Authority::PrefixSection(sender_prefix);
             let dst = Authority::PrefixSection(merge_prefix);
@@ -3373,10 +3371,8 @@ impl Node {
     }
 
     fn cache_section_update_request(&mut self, other_section_prefix: Prefix<XorName>) {
-        if (self.peer_mgr
-                .routing_table()
-                .should_merge(self.we_want_to_merge(), self.they_want_to_merge())
-                .is_some() || self.we_want_to_merge() || self.they_want_to_merge()) &&
+        if (self.peer_mgr.routing_table().should_merge() || self.we_want_to_merge() ||
+            self.they_want_to_merge()) &&
            other_section_prefix != self.our_prefix().sibling() {
             // We don't care about duplicate cached prefixes - ignore result.
             let _ = self.cached_section_update_requests
@@ -3540,9 +3536,10 @@ impl Bootstrapped for Node {
             }
             Section(_) => {
                 vec![SectionList::new(*self.our_prefix(),
-                                      self.peer_mgr.get_pub_ids(self.peer_mgr
-                                                                    .routing_table()
-                                                                    .our_section()))]
+                                      self.peer_mgr
+                                          .get_pub_ids(self.peer_mgr
+                                                           .routing_table()
+                                                           .our_section()))]
             }
             PrefixSection(ref prefix) => {
                 self.peer_mgr
