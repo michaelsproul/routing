@@ -82,6 +82,13 @@ impl SectionListCache {
         self.update_lists_cache(our_section_size);
     }
 
+    /// Returns whether the given prefix has been signed by the given ID.
+    pub fn has_signed(&self, prefix: &Prefix<XorName>, pub_id: &PublicId) -> bool {
+        self.signed_by
+            .get(pub_id)
+            .map_or(false, |pfxs| pfxs.contains_key(prefix))
+    }
+
     /// Returns the currently signed section list for `prefix` along with a quorum of signatures.
     // TODO: Remove this when the method is used in production
     #[cfg(feature="use-mock-crust")]

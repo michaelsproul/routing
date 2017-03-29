@@ -258,7 +258,7 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
     /// Called once a node has been approved by its own section and is given its peers' tables.
     /// Expects the current sections to be empty.
     pub fn add_prefixes(&mut self, prefixes: Vec<(u64, Prefix<T>)>) -> Result<(), Error> {
-        if !self.sections.is_empty() {
+        if !self.sections.is_empty() || self.our_version != 0 {
             return Err(Error::InvariantViolation);
         }
         for (version, prefix) in prefixes {
@@ -281,6 +281,21 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
             }
         }
         self.check_invariant(true, true)
+    }
+
+    /// Checks that the `NodeApproval` message contains a valid `RoutingTable`.
+    pub fn check_node_approval_msg(&self, sections: Sections<T>) -> Result<(), Error> {
+        let mut temp_rt = RoutingTable::new(self.our_name, self.min_section_size);
+        temp_rt.add_prefixes(sections
+                              .iter()
+                              .map(|(pfx, &(v, _))| (v, *pfx))
+                              .collect())?;
+        for peer in sections
+                .values()
+                .flat_map(|&(_, ref section)| section.iter()) {
+            let _ = temp_rt.add(*peer);
+        }
+        temp_rt.check_invariant(false, true)
     }
 
     /// Returns the `Prefix` of our section
@@ -724,7 +739,7 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
         if !self.our_prefix.is_compatible(&merge_prefix) ||
            self.our_prefix.bit_count() != merge_prefix.bit_count() + 1 ||
            self.our_prefix == merge_details.sender_prefix {
-            debug!("{:?}: Attempt to call merge_own_section() for an already merged prefix {:?}",
+            debug!("{:?} Attempt to call merge_own_section() for an already merged prefix {:?}",
                    self.our_name,
                    merge_prefix);
             return (OwnMergeState::AlreadyMerged, vec![]);
@@ -764,6 +779,13 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
     /// held in the routing table) are returned so the caller can establish connections to these
     /// peers and subsequently add them.
     pub fn merge_other_section(&mut self, merge_details: OtherMergeDetails<T>) -> BTreeSet<T> {
+        if self.our_prefix.is_compatible(&merge_details.prefix) {
+            error!("{:?} Attempt to merge other section {:?} when our prefix is {:?}",
+                   self,
+                   merge_details.prefix,
+                   self.our_prefix);
+            return BTreeSet::new();
+        }
         self.merge(&merge_details.prefix, merge_details.version);
         // Establish list of provided contacts which are currently missing from our table.
         self.sections
