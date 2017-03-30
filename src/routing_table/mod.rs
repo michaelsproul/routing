@@ -136,7 +136,7 @@ const SPLIT_BUFFER: usize = 3;
 
 // Immutable iterator over the entries of a `RoutingTable`.
 pub struct Iter<'a, T: 'a + Binary + Clone + Copy + Default + Hash + Xorable> {
-    inner: Box<Iterator<Item=&'a T> + 'a>,
+    inner: Box<Iterator<Item = &'a T> + 'a>,
     our_name: T,
 }
 
@@ -308,14 +308,17 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
 
     /// Returns the whole routing table, including our section and our name
     pub fn all_sections(&self) -> Sections<T> {
-        self.all_sections_iter().map(|(p, (v, section))| (p, (v, section.clone()))).collect()
+        self.all_sections_iter()
+            .map(|(p, (v, section))| (p, (v, section.clone())))
+            .collect()
     }
 
     /// Create an iterator over all sections including our own.
-    pub fn all_sections_iter<'a>(&'a self)
-        -> Box<Iterator<Item=(Prefix<T>, (u64, &'a BTreeSet<T>))> + 'a>
-    {
-        let iter = self.sections.iter()
+    pub fn all_sections_iter<'a>
+        (&'a self)
+         -> Box<Iterator<Item = (Prefix<T>, (u64, &'a BTreeSet<T>))> + 'a> {
+        let iter = self.sections
+            .iter()
             .map(|(&p, &(v, ref sec))| (p, (v, sec)))
             .chain(iter::once((self.our_prefix, (self.our_version, &self.our_section))));
         Box::new(iter)
@@ -345,7 +348,9 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
     /// Returns the total number of entries in the routing table, excluding our own name.
     // TODO: refactor to include our name?
     pub fn len(&self) -> usize {
-        self.all_sections_iter().map(|(_, (_, section))| section.len()).sum::<usize>() - 1
+        self.all_sections_iter()
+            .map(|(_, (_, section))| section.len())
+            .sum::<usize>() - 1
     }
 
     /// Is the table empty? (Returns `true` if no nodes besides our own are known;
@@ -377,7 +382,8 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
     /// Iterates over all nodes known by the routing table, excluding our own name.
     // TODO: do we need to exclude our name?
     pub fn iter(&self) -> Iter<T> {
-        let iter = self.all_sections_iter().flat_map(|(_, (_, section))| section.iter());
+        let iter = self.all_sections_iter()
+            .flat_map(|(_, (_, section))| section.iter());
         Iter {
             inner: Box::new(iter),
             our_name: self.our_name,
@@ -413,7 +419,9 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
 
     /// Collects prefixes of all sections known by the routing table into a `BTreeSet`.
     pub fn prefixes(&self) -> BTreeSet<Prefix<T>> {
-        self.all_sections_iter().map(|(prefix, _)| prefix).collect()
+        self.all_sections_iter()
+            .map(|(prefix, _)| prefix)
+            .collect()
     }
 
     /// If our section is the closest one to `name`, returns all names in our section *including
@@ -557,11 +565,11 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
 
     /// Return true if any neighbouring section is below the given size threshold.
     fn neighbour_size_is_below(&self, threshold: usize) -> bool {
-        self.sections.iter()
+        self.sections
+            .iter()
             .any(|(prefix, &(_, ref section))| {
-                prefix.popped().is_compatible(&self.our_prefix) &&
-                section.len() < threshold
-            })
+                     prefix.popped().is_compatible(&self.our_prefix) && section.len() < threshold
+                 })
     }
 
     /// Returns whether we should split into two sections.
