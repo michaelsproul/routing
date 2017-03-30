@@ -597,6 +597,13 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
 
         if let Some((v, to_split)) = self.sections.remove(&prefix) {
             if v != version {
+                debug!("{:?} Not splitting section with {:?} ver. {}, \
+                       update is for a different version: {}",
+                    self.our_name,
+                    prefix,
+                    v,
+                    version
+                );
                 self.insert_new_section(prefix, v, to_split);
                 return (result, None);
             }
@@ -630,8 +637,8 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
         // If the prefix would wrongly supersede a prefix, reject.
         for (pfx, (v, _)) in self.all_sections_iter() {
             if prefix.is_compatible(&pfx) && version <= v {
-                trace!("Not adding {:?} ver. {} to the RT as conflicting {:?} \
-                        ver. {} is more up to date.", prefix, version, pfx, v);
+                trace!("{:?} Not adding {:?} v{} to the RT as conflicting {:?} v{} \
+                       is more up to date.", self.our_name, prefix, version, pfx, v);
                 return vec![];
             }
         }
@@ -784,7 +791,7 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
     pub fn merge_other_section(&mut self, merge_details: OtherMergeDetails<T>) -> BTreeSet<T> {
         if self.our_prefix.is_compatible(&merge_details.prefix) {
             error!("{:?} Attempt to merge other section {:?} when our prefix is {:?}",
-                   self,
+                   self.our_name,
                    merge_details.prefix,
                    self.our_prefix);
             return BTreeSet::new();
@@ -964,6 +971,13 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
 
     fn split_our_section(&mut self, version: u64) -> Vec<T> {
         if self.our_version != version {
+            debug!("{:?} Not splitting our section with {:?} ver. {}, \
+                   update is for a different version: {}",
+                self.our_name,
+                self.our_prefix,
+                self.our_version,
+                version
+            );
             return Vec::new(); // Wrong version.
         }
         let next_bit = self.our_name.bit(self.our_prefix.bit_count());
