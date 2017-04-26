@@ -45,6 +45,7 @@ pub struct StateMachine {
     crust_rx: Receiver<CrustEvent>,
     action_rx: Receiver<Action>,
     is_running: bool,
+    evil: bool,
 }
 
 // FIXME - See https://maidsafe.atlassian.net/browse/MAID-2026 for info on removing this exclusion.
@@ -78,13 +79,14 @@ impl State {
     fn into_bootstrapped(self,
                          proxy_peer_id: PeerId,
                          proxy_public_id: PublicId,
-                         outbox: &mut EventBox)
+                         outbox: &mut EventBox,
+                         evil: bool)
                          -> Self {
         match self {
             State::Bootstrapping(state) => {
                 if state.client_restriction() {
                     State::Client(state.into_client(proxy_peer_id, proxy_public_id, outbox))
-                } else if let Some(state) = state.into_node(proxy_peer_id, proxy_public_id) {
+                } else if let Some(state) = state.into_node(proxy_peer_id, proxy_public_id, evil) {
                     State::Node(state)
                 } else {
                     outbox.send_event(Event::RestartRequired);
@@ -207,7 +209,7 @@ pub enum Transition {
 impl StateMachine {
     // Construct a new StateMachine by passing a function returning the initial
     // state.
-    pub fn new<F>(init_state: F, outbox: &mut EventBox) -> (RoutingActionSender, Self)
+    pub fn new<F>(init_state: F, outbox: &mut EventBox, evil: bool) -> (RoutingActionSender, Self)
         where F: FnOnce(RoutingActionSender, Service, Timer, &mut EventBox) -> State
     {
         let (category_tx, category_rx) = mpsc::channel();
@@ -241,6 +243,7 @@ impl StateMachine {
             action_rx: action_rx,
             state: state,
             is_running: is_running,
+            evil: evil
         };
 
         (action_sender, machine)
@@ -278,7 +281,7 @@ impl StateMachine {
                 // Temporarily switch to `Terminated` to allow moving out of the current
                 // state without moving `self`.
                 let prev_state = mem::replace(&mut self.state, State::Terminated);
-                self.state = prev_state.into_bootstrapped(proxy_peer_id, proxy_public_id, outbox);
+                self.state = prev_state.into_bootstrapped(proxy_peer_id, proxy_public_id, outbox, self.evil);
             }
             Transition::Terminate => self.terminate(),
         }

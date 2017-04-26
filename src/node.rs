@@ -50,6 +50,7 @@ use xor_name::XorName;
 pub struct NodeBuilder {
     cache: Box<Cache>,
     first: bool,
+    evil: bool,
     deny_other_local_nodes: bool,
 }
 
@@ -66,6 +67,14 @@ impl NodeBuilder {
     pub fn first(self, first: bool) -> NodeBuilder {
         NodeBuilder {
             first: first,
+            ..self
+        }
+    }
+
+    /// Make this node evil.
+    pub fn evil(self, evil: bool) -> NodeBuilder {
+        NodeBuilder {
+            evil: evil,
             ..self
         }
     }
@@ -112,6 +121,7 @@ impl NodeBuilder {
                           outbox: &mut EventBox)
                           -> (RoutingActionSender, StateMachine) {
         let full_id = FullId::new();
+        let evil = self.evil;
 
         StateMachine::new(move |action_sender, crust_service, timer, outbox2| if self.first {
                               if let Some(state) = states::Node::first(action_sender,
@@ -141,7 +151,8 @@ impl NodeBuilder {
                                                          timer)
                                   .map_or(State::Terminated, State::Bootstrapping)
                           },
-                          outbox)
+                          outbox,
+                          evil)
     }
 }
 
@@ -165,6 +176,7 @@ impl Node {
         NodeBuilder {
             cache: Box::new(NullCache),
             first: false,
+            evil: false,
             deny_other_local_nodes: false,
         }
     }

@@ -206,7 +206,7 @@ pub use data::{AppendWrapper, AppendedData, Data, DataIdentifier, Filter, Immuta
                MAX_IMMUTABLE_DATA_SIZE_IN_BYTES, MAX_PRIV_APPENDABLE_DATA_SIZE_IN_BYTES,
                MAX_PUB_APPENDABLE_DATA_SIZE_IN_BYTES, MAX_STRUCTURED_DATA_SIZE_IN_BYTES,
                NO_OWNER_PUB_KEY, PrivAppendableData, PrivAppendedData, PubAppendableData,
-               StructuredData};
+               StructuredData, PendingMutationType, data_manager_hash, RefreshData};
 pub use error::{InterfaceError, RoutingError};
 pub use event::Event;
 pub use event_stream::EventStream;

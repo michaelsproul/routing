@@ -32,6 +32,9 @@ use rust_sodium::crypto::sign::{self, PublicKey, Signature};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use xor_name::XorName;
+use sha3;
+use tiny_keccak::sha3_256;
+use maidsafe_utilities::serialisation;
 
 /// A signing key with no matching private key. Passing ownership to it will make a chunk
 /// effectively immutable.
@@ -73,6 +76,33 @@ pub enum Data {
     /// `PrivAppendableData` data type.
     PrivAppendable(PrivAppendableData),
 }
+
+/// HACK: just here so we can access it from routing.
+#[derive(Clone, Serialize, Copy)]
+pub enum PendingMutationType {
+    /// a
+    Append,
+    /// p
+    Put,
+    /// p
+    Post,
+    /// d
+    Delete,
+}
+
+
+///lebga
+pub fn data_manager_hash(data: &Data, mutate_type: PendingMutationType) -> Option<sha3::Digest256> {
+    match serialisation::serialise(&(data.clone(), mutate_type.clone())) {
+        Err(_) => None,
+        Ok(serialised) => Some(sha3_256(&serialised)),
+    }
+}
+
+/// A message from the group to itself to store the given data. If this accumulates, that means a
+/// quorum of group members approves.
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Copy, Clone)]
+pub struct RefreshData(pub (DataIdentifier, u64), pub sha3::Digest256);
 
 impl Data {
     /// Return data name.

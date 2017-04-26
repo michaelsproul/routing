@@ -172,7 +172,7 @@ impl Bootstrapping {
                                    outbox)
     }
 
-    pub fn into_node(self, proxy_peer_id: PeerId, proxy_public_id: PublicId) -> Option<Node> {
+    pub fn into_node(self, proxy_peer_id: PeerId, proxy_public_id: PublicId, evil: bool) -> Option<Node> {
         Node::from_bootstrapping(self.action_sender,
                                  self.cache,
                                  self.crust_service,
@@ -181,7 +181,8 @@ impl Bootstrapping {
                                  proxy_peer_id,
                                  proxy_public_id,
                                  self.stats,
-                                 self.timer)
+                                 self.timer,
+                                 evil)
     }
 
     pub fn client_restriction(&self) -> bool {

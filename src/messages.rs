@@ -19,7 +19,7 @@ use super::{QUORUM_DENOMINATOR, QUORUM_NUMERATOR};
 use ack_manager::Ack;
 #[cfg(not(feature = "use-mock-crust"))]
 use crust::PeerId;
-use data::{AppendWrapper, Data, DataIdentifier};
+use data::{AppendWrapper, Data, DataIdentifier, PendingMutationType, RefreshData, data_manager_hash};
 use error::RoutingError;
 use event::Event;
 use id::{FullId, PublicId};
@@ -296,6 +296,35 @@ impl SignedMessage {
                src_sections: src_sections,
                signatures: iter::once((*full_id.public_id(), sig)).collect(),
            })
+    }
+
+    // (is_even, is_post)
+    pub fn is_even_user_msg(&self) -> Option<(bool, bool)> {
+        // Only send initial POST to half.
+        // Only send GroupRefresh to half.
+        if let MessageContent::UserMessagePart { ref payload, part_count, .. } = self.content.content {
+            if part_count != 1 {
+                return None;
+            }
+            let (hash, is_post) = match deserialise(payload).unwrap() {
+                UserMessage::Request(Request::Post(ref data, ..)) => {
+                    trace!("Sketchy post request");
+                    (data_manager_hash(data, PendingMutationType::Post).unwrap(), true)
+                }
+                UserMessage::Request(Request::Refresh(ref bytes, ..)) => {
+                    if let Ok(RefreshData(_, hash)) = deserialise(bytes) {
+                        trace!("Sketchy group refresh");
+                        (hash, false)
+                    } else {
+                        return None;
+                    }
+                }
+                _ => return None
+            };
+
+            return Some((hash[31] % 2 == 0, is_post));
+        }
+        None
     }
 
     /// Confirms the signatures.

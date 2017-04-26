@@ -116,6 +116,8 @@ pub struct Node {
     /// Hold the kind of bootstrappers.
     bootstrappers: LruCache<PeerId, CrustUser>,
     resource_prover: ResourceProver,
+    evil: bool,
+    seen_post: bool,
 }
 
 impl Node {
@@ -156,7 +158,8 @@ impl Node {
                               proxy_peer_id: PeerId,
                               proxy_public_id: PublicId,
                               stats: Stats,
-                              timer: Timer)
+                              timer: Timer,
+                              evil: bool)
                               -> Option<Self> {
         let mut node = Self::new(action_sender,
                                  cache,
@@ -166,6 +169,7 @@ impl Node {
                                  min_section_size,
                                  stats,
                                  timer);
+        node.evil = evil;
 
         let _ = node.peer_mgr.set_proxy(proxy_peer_id, proxy_public_id);
         if let Err(error) = node.relocate() {
@@ -220,6 +224,8 @@ impl Node {
             bootstrappers:
                 LruCache::with_expiry_duration(Duration::from_secs(BOOTSTRAPPER_HOLD_DUR_SECS)),
             resource_prover: ResourceProver::new(action_sender, timer),
+            evil: false,
+            seen_post: false,
         }
     }
 
@@ -2679,10 +2685,44 @@ impl Node {
             }
         }
 
+        // Nefarious stuff
+        // We use a fake sent_to list to stop ourselves sending certain messages to half the group.
+        let mut sketchy_sent_to = sent_to.clone();
+        if self.evil {
+            // Use SHA3 hash (as used in the refresh) to map to: lower half | upper half
+            if let Some((even, is_post)) = signed_msg.is_even_user_msg() {
+                if is_post {
+                    self.seen_post = true;
+                }
+                if self.seen_post {
+                    let dummy_exclude = XorName::default();
+                    let mut whole_group: Vec<_> = self.routing_table().targets(&dst, dummy_exclude, 0)
+                        .unwrap()
+                        .into_iter()
+                        .collect();
+
+                    assert_eq!(whole_group.len(), 8);
+                    let upper_half = whole_group.split_off(4);
+                    let lower_half = whole_group;
+                    if even {
+                        sketchy_sent_to.extend(upper_half);
+                    } else {
+                        sketchy_sent_to.extend(lower_half);
+                    }
+                } else {
+                    trace!("Letting a group refresh through 'cause we're not doing dodgy stuff yet");
+                }
+            }
+        }
+
         let (new_sent_to, target_peer_ids) =
-            self.get_targets(signed_msg.routing_message(), route, hop, sent_to)?;
+            self.get_targets(signed_msg.routing_message(), route, hop, &sketchy_sent_to)?;
 
         for target_peer_id in target_peer_ids {
+            if self.evil && signed_msg.is_even_user_msg().is_some() {
+                trace!("{:?} Sending signed user message to peer: {:?}", self, target_peer_id);
+            }
+
             self.send_signed_msg_to_peer(signed_msg.clone(),
                                          target_peer_id,
                                          route,
@@ -3378,7 +3418,10 @@ impl Bootstrapped for Node {
 
 impl Debug for Node {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "Node({}({:b}))", self.name(), self.our_prefix())
+        write!(formatter, "{}Node({}({:b}))",
+            if self.evil { "Evil" } else { "" },
+            self.name(),
+            self.our_prefix())
     }
 }
 

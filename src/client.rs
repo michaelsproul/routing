@@ -131,7 +131,8 @@ impl Client {
                                        timer)
                     .map_or(State::Terminated, State::Bootstrapping)
         },
-                          outbox)
+                          outbox,
+                          false)
     }
 
     /// Send a Get message with a `DataIdentifier` to an `Authority`, signed with given keys.
