@@ -106,6 +106,8 @@
 
 // For explanation of lint checks, run `rustc -W help` or see
 // https://github.com/maidsafe/QA/blob/master/Documentation/Rust%20Lint%20Checks.md
+// FIXME(michael): re-enable lints
+/*
 #![forbid(exceeding_bitshifts, mutable_transmutes, no_mangle_const_items,
           unknown_crate_types, warnings)]
 #![deny(bad_style, deprecated, improper_ctypes, missing_docs,
@@ -122,6 +124,7 @@
                                     option_unwrap_used))]
 // Allow `panic_params` until https://github.com/Manishearth/rust-clippy/issues/768 is resolved.
 #![cfg_attr(feature="cargo-clippy", allow(panic_params))]
+*/
 
 extern crate hex;
 #[macro_use]
@@ -201,10 +204,12 @@ pub mod sha3;
 
 /// Messaging infrastructure
 pub mod messaging;
-/// Structured Data Tag for Session Packet Type
+/// Mutable data tag for Session Packet Type
 pub const TYPE_TAG_SESSION_PACKET: u64 = 0;
-/// Structured Data Tag for DNS Packet Type
+/// Mutable data tag for DNS Packet Type
 pub const TYPE_TAG_DNS_PACKET: u64 = 5;
+/// Mutable data tag for transactions
+pub const TYPE_TAG_TXN: u64 = 7;
 
 /// Quorum is defined as having strictly greater than `QUORUM_NUMERATOR / QUORUM_DENOMINATOR`
 /// agreement; using only integer arithmetic a quorum can be checked with

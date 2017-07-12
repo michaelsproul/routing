@@ -23,6 +23,7 @@ use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt::{self, Debug, Formatter};
 use std::mem;
 use xor_name::XorName;
+use log::LogLevel;
 
 /// Maximum allowed size for `MutableData` (1 MiB)
 pub const MAX_MUTABLE_DATA_SIZE_IN_BYTES: u64 = 1024 * 1024;
@@ -51,12 +52,16 @@ pub struct MutableData {
 }
 
 /// A value in `MutableData`
-#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug)]
+#[derive(Hash, Eq, PartialEq, PartialOrd, Ord, Clone, Serialize, Deserialize, Debug, Default)]
 pub struct Value {
     /// Content of the entry.
     pub content: Vec<u8>,
     /// Version of the entry.
     pub entry_version: u64,
+    /// In-progress txn.
+    pub txn: Option<XorName>,
+    /// Future content.
+    pub future_content: Option<Vec<u8>>,
 }
 
 /// Subject of permissions
@@ -152,9 +157,16 @@ pub enum EntryAction {
     /// Inserts a new entry
     Ins(Value),
     /// Updates an entry with a new value and version
-    Update(Value),
+    Update(EntryUpdate),
     /// Deletes an entry by emptying its contents. Contains the version number
     Del(u64),
+}
+
+#[derive(Hash, Debug, Eq, PartialEq, Clone, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct EntryUpdate {
+    new_content: Vec<u8>,
+    new_version: u64,
+    txn: XorName,
 }
 
 /// Helper struct to build entry actions on `MutableData`
@@ -176,18 +188,21 @@ impl EntryActions {
                     EntryAction::Ins(Value {
                                          entry_version: version,
                                          content: content,
+                                         txn: None,
+                                         future_content: None,
                                      }));
         self
     }
 
     /// Update existing key-value pair
-    pub fn update(mut self, key: Vec<u8>, content: Vec<u8>, version: u64) -> Self {
+    pub fn update(mut self, key: Vec<u8>, content: Vec<u8>, version: u64, txn: XorName) -> Self {
         let _ = self.actions
             .insert(key,
-                    EntryAction::Update(Value {
-                                            entry_version: version,
-                                            content: content,
-                                        }));
+                    EntryAction::Update(EntryUpdate {
+                        new_version: version,
+                        new_content: content,
+                        txn,
+                    }));
         self
     }
 
@@ -308,19 +323,19 @@ impl MutableData {
         let (insert, update, delete) = actions
             .into_iter()
             .fold((BTreeMap::new(), BTreeMap::new(), BTreeMap::new()),
-                  |(mut insert, mut update, mut delete), (key, item)| {
+                  |(mut inserts, mut updates, mut deletes), (key, item)| {
                 match item {
                     EntryAction::Ins(value) => {
-                        let _ = insert.insert(key, value);
+                        let _ = inserts.insert(key, value);
                     }
-                    EntryAction::Update(value) => {
-                        let _ = update.insert(key, value);
+                    EntryAction::Update(update) => {
+                        updates.insert(key, update);
                     }
                     EntryAction::Del(version) => {
-                        let _ = delete.insert(key, version);
+                        let _ = deletes.insert(key, version);
                     }
                 };
-                (insert, update, delete)
+                (inserts, updates, deletes)
             });
 
         if (!insert.is_empty() && !self.is_action_allowed(requester, Action::Insert)) ||
@@ -337,15 +352,18 @@ impl MutableData {
             }
         }
 
-        for (key, val) in update {
+        for (key, EntryUpdate { new_content, new_version, txn}) in update {
             if !new_data.contains_key(&key) {
                 return Err(ClientError::NoSuchEntry);
             }
             let version_valid = if let Entry::Occupied(mut oe) = new_data.entry(key.clone()) {
-                if val.entry_version != oe.get().entry_version + 1 {
+                let entry = oe.get_mut();
+                if new_version != entry.entry_version + 1 {
                     false
                 } else {
-                    let _prev = oe.insert(val);
+                    entry.future_content = Some(new_content);
+                    entry.entry_version = new_version;
+                    entry.txn = Some(txn);
                     true
                 }
             } else {
@@ -370,6 +388,8 @@ impl MutableData {
                     let _prev = oe.insert(Value {
                                               content: vec![],
                                               entry_version: version,
+                                              future_content: None,
+                                              txn: None,
                                           });
                     true
                 }
@@ -397,23 +417,26 @@ impl MutableData {
 
     /// Mutates entries without performing any validation.
     ///
-    /// For updates and deletes, the mutation is performed only if he entry version
+    /// For updates and deletes, the mutation is performed only if the entry version
     /// of the action is higher than the current version of the entry.
     pub fn mutate_entries_without_validation(&mut self, actions: BTreeMap<Vec<u8>, EntryAction>) {
         for (key, action) in actions {
             match action {
                 EntryAction::Ins(new_value) => {
-                    let _ = self.data.insert(key, new_value);
+                    self.data.insert(key, new_value);
                 }
-                EntryAction::Update(new_value) => {
+                EntryAction::Update(EntryUpdate { new_content, new_version, txn }) => {
                     match self.data.entry(key) {
-                        Entry::Occupied(mut entry) => {
-                            if new_value.entry_version > entry.get().entry_version {
-                                let _ = entry.insert(new_value);
+                        Entry::Occupied(mut oe) => {
+                            let entry = oe.get_mut();
+                            if new_version > entry.entry_version {
+                                entry.future_content = Some(new_content);
+                                entry.txn = Some(txn);
+                                entry.entry_version = new_version;
                             }
                         }
-                        Entry::Vacant(entry) => {
-                            let _ = entry.insert(new_value);
+                        Entry::Vacant(_) => {
+                            log_or_panic!(LogLevel::Error, "No entry to update!");
                         }
                     }
                 }
@@ -423,6 +446,8 @@ impl MutableData {
                             let _ = entry.insert(Value {
                                                      content: Vec::new(),
                                                      entry_version: new_version,
+                                                     txn: None,
+                                                     future_content: None,
                                                  });
                         }
                     }
@@ -899,7 +924,7 @@ mod tests {
         let _ = v2.insert(vec![1],
                           EntryAction::Ins(Value {
                                                content: vec![1],
-                                               entry_version: 0,
+                                               ..Value::default()
                                            }));
         assert_err!(md.mutate_entries(v2, pk1), ClientError::AccessDenied);
 
