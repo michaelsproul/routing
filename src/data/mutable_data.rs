@@ -332,10 +332,9 @@ impl MutableData {
         let mut new_data = self.data.clone();
 
         for (key, val) in insert {
-            if new_data.contains_key(&key) {
+            if new_data.insert(key.clone(), val).is_some() {
                 return Err(ClientError::EntryExists);
             }
-            let _ = new_data.insert(key.clone(), val);
         }
 
         for (key, val) in update {
@@ -580,14 +579,10 @@ impl MutableData {
         if self.owners.contains(&requester) {
             return true;
         }
-        match self.permissions.get(&User::Key(requester)) {
-            Some(perms) => {
-                perms
-                    .is_allowed(action)
-                    .unwrap_or_else(|| self.check_anyone_permissions(action))
-            }
-            None => self.check_anyone_permissions(action),
-        }
+        self.permissions
+            .get(&User::Key(requester))
+            .and_then(|perms| perms.is_allowed(action))
+            .unwrap_or_else(|| self.check_anyone_permissions(action))
     }
 }
 
