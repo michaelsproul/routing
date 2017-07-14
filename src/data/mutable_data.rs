@@ -332,10 +332,20 @@ impl MutableData {
         let mut new_data = self.data.clone();
 
         for (key, val) in insert {
-            if new_data.contains_key(&key) {
-                return Err(ClientError::EntryExists);
+            match new_data.entry(key) {
+                // Key did not exist, insert as normal.
+                Entry::Vacant(entry) => {
+                    let _ = entry.insert(val);
+                }
+                // Key does exist, check if the value is the same as the one we're inserting.
+                Entry::Occupied(entry) => {
+                    if *entry.get() != val {
+                        // FIXME: change this error.
+                        return Err(ClientError::EntryExists);
+                    }
+                    // For idempotence, do nothing, this is ok.
+                }
             }
-            let _ = new_data.insert(key.clone(), val);
         }
 
         for (key, val) in update {
@@ -343,11 +353,18 @@ impl MutableData {
                 return Err(ClientError::NoSuchEntry);
             }
             let version_valid = if let Entry::Occupied(mut oe) = new_data.entry(key.clone()) {
-                if val.entry_version != oe.get().entry_version + 1 {
-                    false
-                } else {
+                // Successor.
+                if val.entry_version == oe.get().entry_version + 1 {
                     let _prev = oe.insert(val);
                     true
+                }
+                // Idempotence.
+                else if val == *oe.get() {
+                    true
+                }
+                // Version too low, or greater than existing_version + 1.
+                else {
+                    false
                 }
             } else {
                 false
@@ -852,6 +869,28 @@ mod tests {
 
         let _ = del.insert(vec![1], EntryAction::Del(2));
         assert!(md.mutate_entries(del, owner).is_ok());
+    }
+
+    #[test]
+    fn idempotentence() {
+        let (owner, _) = sign::gen_keypair();
+
+        let mut owners = BTreeSet::new();
+        owners.insert(owner);
+        let mut md =
+            unwrap!(MutableData::new(rand::random(), 0, BTreeMap::new(), BTreeMap::new(), owners));
+
+        let mut v1 = BTreeMap::new();
+        let _ = v1.insert(vec![1],
+                          EntryAction::Ins(Value {
+                                               content: vec![100],
+                                               entry_version: 0,
+                                           }));
+        // Insert the entry.
+        assert!(md.mutate_entries(v1.clone(), owner).is_ok());
+
+        // Re-insert the entry, which should be fine.
+        assert!(md.mutate_entries(v1, owner).is_ok());
     }
 
     #[test]
