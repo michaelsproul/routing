@@ -99,6 +99,8 @@
 //! - [Churn (`NewNode`)](new-node.png)
 //! - [Tunnel](tunnel.png)
 
+// FIXME(michael): re-enable warnings, and unused lints.
+
 #![doc(html_logo_url =
            "https://raw.githubusercontent.com/maidsafe/QA/master/Images/maidsafe_logo.png",
        html_favicon_url = "https://maidsafe.net/img/favicon.ico",
@@ -107,14 +109,14 @@
 // For explanation of lint checks, run `rustc -W help` or see
 // https://github.com/maidsafe/QA/blob/master/Documentation/Rust%20Lint%20Checks.md
 #![forbid(exceeding_bitshifts, mutable_transmutes, no_mangle_const_items,
-          unknown_crate_types, warnings)]
+          unknown_crate_types)]
 #![deny(bad_style, deprecated, improper_ctypes, missing_docs,
         non_shorthand_field_patterns, overflowing_literals, plugin_as_library,
         private_no_mangle_fns, private_no_mangle_statics, stable_features, unconditional_recursion,
-        unknown_lints, unsafe_code, unused, unused_allocation, unused_attributes,
+        unknown_lints, unsafe_code, unused_allocation, unused_attributes,
         unused_comparisons, unused_features, unused_parens, while_true)]
 #![warn(trivial_casts, trivial_numeric_casts, unused_extern_crates, unused_import_braces,
-        unused_qualifications, unused_results)]
+        unused_qualifications)]
 #![allow(box_pointers, fat_ptr_transmutes, missing_copy_implementations,
          missing_debug_implementations, variant_size_differences, non_camel_case_types)]
 
@@ -149,6 +151,8 @@ extern crate serde_derive;
 #[cfg(test)]
 extern crate serde_json;
 extern crate tiny_keccak;
+#[macro_use]
+extern crate maplit;
 
 // Needs to be before all other modules to make the macros available to them.
 #[macro_use]
@@ -157,6 +161,7 @@ mod macros;
 mod ack_manager;
 mod action;
 mod cache;
+mod chain;
 mod client;
 mod client_error;
 mod common_types;

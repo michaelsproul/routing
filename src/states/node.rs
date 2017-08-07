@@ -21,6 +21,7 @@ use {CrustEvent, PrivConnectionInfo, PubConnectionInfo, QUORUM_DENOMINATOR, QUOR
 use ack_manager::{Ack, AckManager};
 use action::Action;
 use cache::Cache;
+use chain::{Block, Chain};
 use config_handler;
 use crust::{ConnectionInfoResult, CrustError, CrustUser};
 use cumulative_own_section_merge::CumulativeOwnSectionMerge;
@@ -90,6 +91,8 @@ pub struct Node {
     ack_mgr: AckManager,
     cacheable_user_msg_cache: UserMessageCache,
     crust_service: Service,
+    /// Section membership chain (under construction data chain).
+    chain: Chain,
     /// ID from before relocating.
     old_full_id: FullId,
     full_id: FullId,
@@ -156,10 +159,13 @@ impl Node {
     ) -> Option<Self> {
         // old_id is useless for first node
         let old_id = FullId::new();
+        let genesis_block = Block::genesis(*full_id.public_id());
+        let chain = Chain::with_blocks(btreeset!{ genesis_block });
         let mut node = Self::new(
             action_sender,
             cache,
             crust_service,
+            chain,
             true,
             old_id,
             full_id,
@@ -191,10 +197,13 @@ impl Node {
         stats: Stats,
         timer: Timer,
     ) -> Self {
+        // TODO(chain): get at least one block into the hands of bootstrapping nodes.
+        let chain = Chain::with_blocks(BTreeSet::new());
         let mut node = Self::new(
             action_sender,
             cache,
             crust_service,
+            chain,
             false,
             old_full_id,
             new_full_id,
@@ -219,6 +228,7 @@ impl Node {
         action_sender: RoutingActionSender,
         cache: Box<Cache>,
         crust_service: Service,
+        chain: Chain,
         first_node: bool,
         old_full_id: FullId,
         new_full_id: FullId,
@@ -239,6 +249,7 @@ impl Node {
                 user_msg_cache_duration,
             ),
             crust_service: crust_service,
+            chain,
             old_full_id: old_full_id,
             full_id: new_full_id,
             is_first_node: first_node,
