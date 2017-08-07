@@ -670,7 +670,7 @@ fn core() {
                                   response: Response::PutMData { res: Ok(()), msg_id }, ..
                               }) if index == client.index => {
                         // TODO: assert!(received_ids.insert(id));
-                        let _ = received_ids.insert(msg_id);
+                        received_ids.insert(msg_id);
                     }
                     _ => (),
                 }

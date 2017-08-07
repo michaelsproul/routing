@@ -29,6 +29,7 @@ use event::Event;
 #[cfg(feature = "use-mock-crust")]
 use fake_clock::FakeClock as Instant;
 use id::{FullId, PublicId};
+use ignore_result::Ignore;
 use itertools::Itertools;
 use log::LogLevel;
 use lru_time_cache::LruCache;
@@ -383,7 +384,7 @@ impl Node {
     pub fn handle_action(&mut self, action: Action, outbox: &mut EventBox) -> Transition {
         match action {
             Action::ClientSendRequest { result_tx, .. } => {
-                let _ = result_tx.send(Err(InterfaceError::InvalidState));
+                result_tx.send(Err(InterfaceError::InvalidState)).ignore();
             }
             Action::NodeSendMessage {
                 src,
@@ -397,10 +398,10 @@ impl Node {
                     Err(_) | Ok(()) => Ok(()),
                 };
 
-                let _ = result_tx.send(result);
+                result_tx.send(result).ignore();
             }
             Action::Id { result_tx } => {
-                let _ = result_tx.send(*self.id());
+                result_tx.send(*self.id()).ignore();
             }
             Action::Timeout(token) => {
                 if let Transition::Terminate = self.handle_timeout(token, outbox) {
@@ -527,7 +528,7 @@ impl Node {
             );
             self.disconnect_peer(&pub_id, None);
             if peer_kind == CrustUser::Client {
-                let _ = self.dropped_clients.insert(pub_id, ());
+                self.dropped_clients.insert(pub_id, ());
             }
             return;
         };
@@ -1796,7 +1797,7 @@ impl Node {
         }
 
         self.peer_mgr.handle_bootstrap_request(&pub_id);
-        let _ = self.dropped_clients.remove(&pub_id);
+        self.dropped_clients.remove(&pub_id);
         self.send_direct_message(pub_id, DirectMessage::BootstrapResponse(Ok(())));
         Ok(())
     }
@@ -2429,7 +2430,7 @@ impl Node {
                 tunnel_id,
                 dst_id
             );
-            let _ = self.tunnels.remove(dst_id, tunnel_id);
+            self.tunnels.remove(dst_id, tunnel_id);
             let message = DirectMessage::TunnelDisconnect(dst_id);
             self.send_direct_message(tunnel_id, message);
         }
@@ -2494,19 +2495,19 @@ impl Node {
             debug!("{:?} Disconnecting {:?} (indirect).", self, pub_id);
             let message = DirectMessage::TunnelDisconnect(*pub_id);
             self.send_direct_message(tunnel_id, message);
-            let _ = self.peer_mgr.remove_peer(pub_id);
+            self.peer_mgr.remove_peer(pub_id);
         } else {
             debug!(
                 "{:?} Disconnecting {}. Calling crust::Service::disconnect.",
                 self,
                 pub_id
             );
-            let _ = self.crust_service.disconnect(pub_id);
+            self.crust_service.disconnect(pub_id);
             if let Some((peer, _)) = self.peer_mgr.remove_peer(pub_id) {
                 match *peer.state() {
                     PeerState::Bootstrapper { peer_kind, .. } => {
                         if peer_kind == CrustUser::Client {
-                            let _ = self.dropped_clients.insert(*pub_id, ());
+                            self.dropped_clients.insert(*pub_id, ());
                         }
                     }
                     PeerState::Client { ip, traffic } => {
@@ -2516,7 +2517,7 @@ impl Node {
                             ip,
                             traffic
                         );
-                        let _ = self.dropped_clients.insert(*pub_id, ());
+                        self.dropped_clients.insert(*pub_id, ());
                     }
                     PeerState::ConnectionInfoPreparing { .. } |
                     PeerState::ConnectionInfoReady(_) |
@@ -3357,7 +3358,7 @@ impl Node {
             if let Some(&PeerState::Client { ip, .. }) =
                 self.peer_mgr.get_peer(pub_id).map(Peer::state)
             {
-                let _ = self.correct_rate_limits(&ip, signed_msg.routing_message());
+                self.correct_rate_limits(&ip, signed_msg.routing_message());
             }
 
             if self.filter_outgoing_routing_msg(signed_msg.routing_message(), pub_id, 0) {
@@ -3901,12 +3902,12 @@ impl Node {
     // handle malicious nodes more fully.
     fn ban_and_disconnect_peer(&mut self, pub_id: &PublicId) {
         if let Ok(ip_addr) = self.crust_service.get_peer_ip_addr(pub_id) {
-            let _ = self.banned_client_ips.insert(ip_addr, ());
+            self.banned_client_ips.insert(ip_addr, ());
             debug!("{:?} Banned client {:?} on IP {}", self, pub_id, ip_addr);
         } else {
             warn!("{:?} Can't get IP address of client {:?}.", self, pub_id);
         }
-        let _ = self.dropped_clients.insert(*pub_id, ());
+        self.dropped_clients.insert(*pub_id, ());
         self.disconnect_peer(pub_id, None);
     }
 }
@@ -3971,7 +3972,7 @@ impl Node {
 
     /// Purge invalid routing entries.
     pub fn purge_invalid_rt_entry(&mut self) {
-        let _ = self.purge_invalid_rt_entries(&mut EventBuf::new());
+        self.purge_invalid_rt_entries(&mut EventBuf::new());
     }
 
     pub fn get_timed_out_tokens(&mut self) -> Vec<u64> {

@@ -113,13 +113,13 @@ impl Client {
                     Err(_) | Ok(_) => Ok(()),
                 };
 
-                let _ = result_tx.send(result);
+                result_tx.send(result).ignore();
             }
             Action::NodeSendMessage { result_tx, .. } => {
-                let _ = result_tx.send(Err(InterfaceError::InvalidState));
+                result_tx.send(Err(InterfaceError::InvalidState)).ignore();
             }
             Action::Id { result_tx } => {
-                let _ = result_tx.send(*self.id());
+                result_tx.send(*self.id()).ignore();
             }
             Action::Timeout(token) => self.handle_timeout(token),
             Action::ResourceProofResult(..) => {

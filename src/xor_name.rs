@@ -384,7 +384,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn subtraction_underflow() {
-        let _ = xor_from_int(1_000_001) - xor_from_int(1_000_002);
+        xor_from_int(1_000_001) - xor_from_int(1_000_002);
     }
 
     #[test]
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn division_by_zero() {
-        let _ = xor_from_int(1) / 0;
+        xor_from_int(1) / 0;
     }
 
     #[test]

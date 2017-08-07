@@ -313,7 +313,7 @@ mod unnamed {
         for _ in 0..num_entries {
             let key = rng.gen_iter().take(5).collect();
             let content = rng.gen_iter().take(10).collect();
-            let _ = entries.insert(
+            entries.insert(
                 key,
                 Value {
                     content: content,

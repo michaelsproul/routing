@@ -182,7 +182,7 @@ impl EntryActions {
 
     /// Insert a new key-value pair
     pub fn ins(mut self, key: Vec<u8>, content: Vec<u8>, version: u64) -> Self {
-        let _ = self.actions.insert(
+        self.actions.insert(
             key,
             EntryAction::Ins(Value {
                 entry_version: version,
@@ -194,7 +194,7 @@ impl EntryActions {
 
     /// Update existing key-value pair
     pub fn update(mut self, key: Vec<u8>, content: Vec<u8>, version: u64) -> Self {
-        let _ = self.actions.insert(
+        self.actions.insert(
             key,
             EntryAction::Update(Value {
                 entry_version: version,
@@ -206,7 +206,7 @@ impl EntryActions {
 
     /// Delete existing key
     pub fn del(mut self, key: Vec<u8>, version: u64) -> Self {
-        let _ = self.actions.insert(key, EntryAction::Del(version));
+        self.actions.insert(key, EntryAction::Del(version));
         self
     }
 }
@@ -326,13 +326,13 @@ impl MutableData {
                 |(mut insert, mut update, mut delete), (key, item)| {
                     match item {
                         EntryAction::Ins(value) => {
-                            let _ = insert.insert(key, value);
+                            insert.insert(key, value);
                         }
                         EntryAction::Update(value) => {
-                            let _ = update.insert(key, value);
+                            update.insert(key, value);
                         }
                         EntryAction::Del(version) => {
-                            let _ = delete.insert(key, version);
+                            delete.insert(key, version);
                         }
                     };
                     (insert, update, delete)
@@ -352,13 +352,13 @@ impl MutableData {
         for (key, val) in insert {
             match new_data.entry(key) {
                 Entry::Occupied(entry) => {
-                    let _ = errors.insert(
+                    errors.insert(
                         entry.key().clone(),
                         EntryError::EntryExists(entry.get().entry_version),
                     );
                 }
                 Entry::Vacant(entry) => {
-                    let _ = entry.insert(val);
+                    entry.insert(val);
                 }
             }
         }
@@ -368,16 +368,16 @@ impl MutableData {
                 Entry::Occupied(mut entry) => {
                     let current_version = entry.get().entry_version;
                     if val.entry_version == current_version + 1 {
-                        let _ = entry.insert(val);
+                        entry.insert(val);
                     } else {
-                        let _ = errors.insert(
+                        errors.insert(
                             entry.key().clone(),
                             EntryError::InvalidSuccessor(current_version),
                         );
                     }
                 }
                 Entry::Vacant(entry) => {
-                    let _ = errors.insert(entry.key().clone(), EntryError::NoSuchEntry);
+                    errors.insert(entry.key().clone(), EntryError::NoSuchEntry);
                 }
             }
         }
@@ -390,7 +390,7 @@ impl MutableData {
                 Entry::Occupied(mut entry) => {
                     let current_version = entry.get().entry_version;
                     if version == current_version + 1 {
-                        let _ = entry.insert(Value {
+                        entry.insert(Value {
                                                  content: Vec::new(),
                                                  entry_version: version,
                                              });
@@ -401,7 +401,7 @@ impl MutableData {
                     }
                 }
                 Entry::Vacant(entry) => {
-                    let _ = errors.insert(entry.key().clone(), EntryError::NoSuchEntry);
+                    errors.insert(entry.key().clone(), EntryError::NoSuchEntry);
                 }
             }
         }
@@ -432,24 +432,24 @@ impl MutableData {
         for (key, action) in actions {
             match action {
                 EntryAction::Ins(new_value) => {
-                    let _ = self.data.insert(key, new_value);
+                    self.data.insert(key, new_value);
                 }
                 EntryAction::Update(new_value) => {
                     match self.data.entry(key) {
                         Entry::Occupied(mut entry) => {
                             if new_value.entry_version > entry.get().entry_version {
-                                let _ = entry.insert(new_value);
+                                entry.insert(new_value);
                             }
                         }
                         Entry::Vacant(entry) => {
-                            let _ = entry.insert(new_value);
+                            entry.insert(new_value);
                         }
                     }
                 }
                 EntryAction::Del(new_version) => {
                     if let Entry::Occupied(mut entry) = self.data.entry(key) {
                         if new_version > entry.get().entry_version {
-                            let _ = entry.insert(Value {
+                            entry.insert(Value {
                                 content: Vec::new(),
                                 entry_version: new_version,
                             });
@@ -469,14 +469,14 @@ impl MutableData {
         match self.data.entry(key) {
             Entry::Occupied(mut entry) => {
                 if value.entry_version > entry.get().entry_version {
-                    let _ = entry.insert(value);
+                    entry.insert(value);
                     true
                 } else {
                     false
                 }
             }
             Entry::Vacant(entry) => {
-                let _ = entry.insert(value);
+                entry.insert(value);
                 true
             }
         }
@@ -509,7 +509,7 @@ impl MutableData {
         let prev = self.permissions.insert(user, permissions);
         if !self.validate_size() {
             // Serialised data size limit is exceeded
-            let _ = match prev {
+            match prev {
                 None => self.permissions.remove(&user),
                 Some(perms) => self.permissions.insert(user, perms),
             };
@@ -530,7 +530,7 @@ impl MutableData {
             return false;
         }
 
-        let _ = self.permissions.insert(user, permissions);
+        self.permissions.insert(user, permissions);
         self.version = version;
         true
     }
@@ -551,7 +551,7 @@ impl MutableData {
         if !self.permissions.contains_key(user) {
             return Err(ClientError::NoSuchKey);
         }
-        let _ = self.permissions.remove(user);
+        self.permissions.remove(user);
         self.version = version;
         Ok(())
     }
@@ -562,7 +562,7 @@ impl MutableData {
             return false;
         }
 
-        let _ = self.permissions.remove(user);
+        self.permissions.remove(user);
         self.version = version;
         true
     }
@@ -664,12 +664,12 @@ mod tests {
         let mut perms = BTreeMap::new();
 
         let ps1 = PermissionSet::new().allow(Action::Update);
-        let _ = perms.insert(User::Anyone, ps1);
+        perms.insert(User::Anyone, ps1);
 
         let ps2 = PermissionSet::new().deny(Action::Update).allow(
             Action::Insert,
         );
-        let _ = perms.insert(User::Key(pk1), ps2);
+        perms.insert(User::Key(pk1), ps2);
 
         let k1 = b"123".to_vec();
         let k2 = b"234".to_vec();
@@ -824,8 +824,8 @@ mod tests {
 
         // It must not be possible to create MutableData that exceeds the size limit.
         let mut data = BTreeMap::new();
-        let _ = data.insert(vec![0], big_val.clone());
-        let _ = data.insert(vec![1], small_val.clone());
+        data.insert(vec![0], big_val.clone());
+        data.insert(vec![1], small_val.clone());
 
         assert_err!(
             MutableData::new(rand::random(), 0, BTreeMap::new(), data, BTreeSet::new()),
@@ -833,7 +833,7 @@ mod tests {
         );
 
         let mut data = BTreeMap::new();
-        let _ = data.insert(vec![0], big_val.clone());
+        data.insert(vec![0], big_val.clone());
 
         let (owner, _) = sign::gen_keypair();
         let owners = iter::once(owner).collect();
@@ -894,7 +894,7 @@ mod tests {
         ));
 
         let mut v1 = BTreeMap::new();
-        let _ = v1.insert(
+        v1.insert(
             vec![1],
             EntryAction::Ins(Value {
                 content: vec![100],
@@ -905,7 +905,7 @@ mod tests {
 
         // Check update with invalid versions
         let mut v2 = BTreeMap::new();
-        let _ = v2.insert(
+        v2.insert(
             vec![1],
             EntryAction::Update(Value {
                 content: vec![105],
@@ -922,7 +922,7 @@ mod tests {
             x => panic!("Unexpected {:?}", x),
         }
 
-        let _ = v2.insert(
+        v2.insert(
             vec![1],
             EntryAction::Update(Value {
                 content: vec![105],
@@ -940,7 +940,7 @@ mod tests {
         }
 
         // Check update with a valid version
-        let _ = v2.insert(
+        v2.insert(
             vec![1],
             EntryAction::Update(Value {
                 content: vec![105],
@@ -951,7 +951,7 @@ mod tests {
 
         // Check delete version
         let mut del = BTreeMap::new();
-        let _ = del.insert(vec![1], EntryAction::Del(1));
+        del.insert(vec![1], EntryAction::Del(1));
         match md.mutate_entries(del.clone(), owner) {
             Err(ClientError::InvalidEntryActions(errors)) => {
                 assert_eq!(
@@ -962,7 +962,7 @@ mod tests {
             x => panic!("Unexpected {:?}", x),
         }
 
-        let _ = del.insert(vec![1], EntryAction::Del(2));
+        del.insert(vec![1], EntryAction::Del(2));
         assert!(md.mutate_entries(del, owner).is_ok());
     }
 
@@ -984,7 +984,7 @@ mod tests {
 
         // Trying to do inserts without having a permission must fail
         let mut v1 = BTreeMap::new();
-        let _ = v1.insert(
+        v1.insert(
             vec![0],
             EntryAction::Ins(Value {
                 content: vec![1],
@@ -1026,7 +1026,7 @@ mod tests {
         assert!(md.del_user_permissions(&User::Key(pk1), 3, owner).is_ok());
 
         let mut v2 = BTreeMap::new();
-        let _ = v2.insert(
+        v2.insert(
             vec![1],
             EntryAction::Ins(Value {
                 content: vec![1],

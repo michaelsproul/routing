@@ -1014,7 +1014,7 @@ impl PeerManager {
         }
 
         for id in &expired_peers {
-            let _ = self.remove_peer(id);
+            self.remove_peer(id);
         }
 
         expired_peers
@@ -1029,7 +1029,7 @@ impl PeerManager {
     /// Updates the given clients total traffic amount.
     pub fn add_client_traffic(&mut self, pub_id: &PublicId, added_bytes: u64) {
         let self_pfx = format!("{:?}", self);
-        let _ = self.peers.get_mut(pub_id).map(|peer| {
+        self.peers.get_mut(pub_id).map(|peer| {
             if let PeerState::Client {
                 ip,
                 traffic: old_traffic,
@@ -1448,7 +1448,7 @@ impl PeerManager {
             // SearchingForTunnel or None
             x => {
                 if !is_conn_info_req {
-                    let _ = x.map(|peer| self.insert_peer(peer));
+                    x.map(|peer| self.insert_peer(peer));
                     return Ok(ConnectionInfoReceivedResult::Waiting);
                 }
                 let (valid, reconnecting) = x.map_or((false, ReconnectingPeer::False), |peer| {
@@ -1461,7 +1461,7 @@ impl PeerManager {
                 };
                 self.insert_peer(Peer::new(pub_id, state, valid, reconnecting));
                 let token = rand::random();
-                let _ = self.connection_token_map.insert(token, pub_id);
+                self.connection_token_map.insert(token, pub_id);
                 Ok(ConnectionInfoReceivedResult::Prepare(token))
             }
         }
@@ -1486,7 +1486,7 @@ impl PeerManager {
             None => reconnecting_in,
         };
         let token = rand::random();
-        let _ = self.connection_token_map.insert(token, pub_id);
+        self.connection_token_map.insert(token, pub_id);
         self.insert_peer(Peer::new(
             pub_id,
             PeerState::ConnectionInfoPreparing {
@@ -1506,7 +1506,7 @@ impl PeerManager {
             Error::PeerNotFound,
         )?;
         let new_token = rand::random();
-        let _ = self.connection_token_map.insert(new_token, pub_id);
+        self.connection_token_map.insert(new_token, pub_id);
         Ok(new_token)
     }
 
@@ -1528,7 +1528,7 @@ impl PeerManager {
     }
 
     pub fn insert_peer(&mut self, peer: Peer) {
-        let _ = self.peers.insert(peer.pub_id, peer);
+        self.peers.insert(peer.pub_id, peer);
     }
 
     /// Removes the given entry, returns the removed peer and if it was a routing node,

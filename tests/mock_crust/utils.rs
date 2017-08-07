@@ -335,7 +335,7 @@ impl Cache for TestCache {
 
     fn put(&self, response: Response) {
         if let Response::GetIData { res: Ok(data), .. } = response {
-            let _ = self.0.borrow_mut().insert(*data.name(), data);
+            self.0.borrow_mut().insert(*data.name(), data);
         }
     }
 }
@@ -403,7 +403,7 @@ pub fn remove_nodes_which_failed_to_connect(nodes: &mut Vec<TestNode>, count: us
         })
         .collect_vec();
     for index in &failed_to_join {
-        let _ = nodes.remove(*index);
+        nodes.remove(*index);
     }
     poll_and_resend(nodes, &mut []);
     failed_to_join.len()
@@ -630,7 +630,7 @@ pub fn create_connected_clients(
         );
         clients.push(client);
 
-        let _ = poll_all(nodes, &mut clients);
+        poll_all(nodes, &mut clients);
         expect_next_event!(unwrap!(clients.last_mut()), Event::Connected);
     }
 
@@ -644,7 +644,7 @@ pub fn create_connected_clients(
 /// function on them which causes polling, so it calls `poll_all` to make sure that all other
 /// events have been processed before sorting.
 pub fn sort_nodes_by_distance_to(nodes: &mut [TestNode], name: &XorName) {
-    let _ = poll_all(nodes, &mut []); // Poll
+    poll_all(nodes, &mut []); // Poll
     nodes.sort_by(|node0, node1| {
         name.cmp_distance(&node0.name(), &node1.name())
     });
@@ -694,7 +694,7 @@ fn sanity_check(prefix_lengths: &[usize]) {
 }
 
 fn prefixes<T: Rng>(prefix_lengths: &[usize], rng: &mut T) -> Vec<Prefix<XorName>> {
-    let _ = prefix_lengths.iter().fold(0, |previous, &current| {
+    prefix_lengths.iter().fold(0, |previous, &current| {
         assert!(
             previous <= current,
             "Slice {:?} should be sorted.",

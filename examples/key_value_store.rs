@@ -123,8 +123,8 @@ Options:
             let stdin = io::stdin();
 
             print!("Enter command (exit | put <key> <value> | get <key>)\n> ");
-            let _ = io::stdout().flush();
-            let _ = stdin.read_line(&mut command);
+            io::stdout().flush();
+            stdin.read_line(&mut command);
 
             let parts = command
                 .trim_right_matches(|c| c == '\r' || c == '\n')
@@ -132,12 +132,12 @@ Options:
                 .collect::<Vec<_>>();
 
             if parts.len() == 1 && parts[0] == "exit" {
-                let _ = command_sender.send(UserCommand::Exit);
+                command_sender.send(UserCommand::Exit);
                 return;
             } else if parts.len() == 2 && parts[0] == "get" {
-                let _ = command_sender.send(UserCommand::Get(parts[1].to_string()));
+                command_sender.send(UserCommand::Get(parts[1].to_string()));
             } else if parts.len() == 3 && parts[0] == "put" {
-                let _ = command_sender.send(UserCommand::Put(
+                command_sender.send(UserCommand::Put(
                     parts[1].to_string(),
                     parts[2].to_string(),
                 ));

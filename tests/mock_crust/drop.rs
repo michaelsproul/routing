@@ -27,7 +27,7 @@ fn drop_node(nodes: &mut Vec<TestNode>, index: usize) {
 
     drop(node);
 
-    let _ = poll_all(nodes, &mut []);
+    poll_all(nodes, &mut []);
 
     for node in nodes.iter_mut().filter(|n| close_names.contains(&n.name())) {
         loop {

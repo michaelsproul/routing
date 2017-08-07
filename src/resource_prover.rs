@@ -188,7 +188,7 @@ impl ResourceProver {
         });
         // If using mock_crust we want the joiner to drop and join immediately
         if cfg!(feature = "use-mock-crust") {
-            let _ = joiner;
+            drop(joiner);
         } else {
             let old = self.workers.insert(pub_id, (atomic_cancel, joiner));
             if let Some((atomic_cancel, _old_worker)) = old {
@@ -211,7 +211,7 @@ impl ResourceProver {
         let _old = self.workers.remove(&pub_id);
 
         let first_message = unwrap!(messages.pop()); // Sender guarantees at least one message
-        let _ = self.response_parts.insert(pub_id, messages);
+        self.response_parts.insert(pub_id, messages);
         first_message
     }
 

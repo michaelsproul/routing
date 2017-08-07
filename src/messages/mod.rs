@@ -313,7 +313,7 @@ impl SignedMessage {
     /// list.
     pub fn add_signature(&mut self, pub_id: PublicId, sig: sign::Signature) {
         if self.content.src.is_multiple() && self.is_sender(&pub_id) {
-            let _ = self.signatures.insert(pub_id, sig);
+            self.signatures.insert(pub_id, sig);
         }
     }
 
@@ -361,7 +361,7 @@ impl SignedMessage {
             }
         };
         for invalid_signature in &self.find_invalid_sigs(signed_bytes) {
-            let _ = self.signatures.remove(invalid_signature);
+            self.signatures.remove(invalid_signature);
         }
 
         self.has_enough_sigs(min_section_size)

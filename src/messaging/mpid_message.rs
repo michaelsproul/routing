@@ -173,7 +173,7 @@ mod tests {
                 &secret_key,
             ).is_err()
         );
-        let _ = body.pop();
+        body.pop();
 
         // Check verify function with a valid and invalid key
         assert!(message.verify(&public_key));

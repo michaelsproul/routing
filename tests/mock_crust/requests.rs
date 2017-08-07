@@ -40,7 +40,7 @@ fn successful_put_request() {
             .is_ok()
     );
 
-    let _ = poll_all(&mut nodes, &mut clients);
+    poll_all(&mut nodes, &mut clients);
 
     let mut request_received_count = 0;
     for node in nodes.iter_mut().filter(|n| n.is_recipient(&dst)) {
@@ -87,7 +87,7 @@ fn successful_get_request() {
             .is_ok()
     );
 
-    let _ = poll_all(&mut nodes, &mut clients);
+    poll_all(&mut nodes, &mut clients);
 
     let mut request_received_count = 0;
 
@@ -125,7 +125,7 @@ fn successful_get_request() {
     // TODO: Assert a quorum here.
     assert!(2 * request_received_count > min_section_size);
 
-    let _ = poll_all(&mut nodes, &mut clients);
+    poll_all(&mut nodes, &mut clients);
 
     let mut response_received_count = 0;
 
@@ -172,7 +172,7 @@ fn failed_get_request() {
             .is_ok()
     );
 
-    let _ = poll_all(&mut nodes, &mut clients);
+    poll_all(&mut nodes, &mut clients);
 
     let mut request_received_count = 0;
 
@@ -210,7 +210,7 @@ fn failed_get_request() {
     // TODO: Assert a quorum here.
     assert!(2 * request_received_count > min_section_size);
 
-    let _ = poll_all(&mut nodes, &mut clients);
+    poll_all(&mut nodes, &mut clients);
 
     let mut response_received_count = 0;
 
@@ -257,7 +257,7 @@ fn disconnect_on_get_request() {
             .is_ok()
     );
 
-    let _ = poll_all(&mut nodes, &mut clients);
+    poll_all(&mut nodes, &mut clients);
 
     let mut request_received_count = 0;
 
@@ -310,7 +310,7 @@ fn disconnect_on_get_request() {
             .uid
     ));
 
-    let _ = poll_all(&mut nodes, &mut clients);
+    poll_all(&mut nodes, &mut clients);
 
     for client in &mut clients {
         if let Ok(Event::Response { .. }) = client.inner.try_next_ev() {

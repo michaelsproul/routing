@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(*header.metadata(), metadata);
         metadata.push(0);
         assert!(MpidHeader::new(sender, metadata.clone(), &secret_key).is_err());
-        let _ = metadata.pop();
+        metadata.pop();
 
         // Check verify function with a valid and invalid key
         assert!(header.verify(&public_key));

@@ -68,7 +68,7 @@ impl Tunnels {
         } else {
             (dst_id, src_id)
         };
-        let _ = self.new_clients.insert(&(id0, id1));
+        self.new_clients.insert(&(id0, id1));
         Some((id0, id1))
     }
 
@@ -120,7 +120,7 @@ impl Tunnels {
         match self.tunnels.entry(dst_id) {
             Entry::Occupied(_) => false,
             Entry::Vacant(entry) => {
-                let _ = entry.insert(tunnel_id);
+                entry.insert(tunnel_id);
                 true
             }
         }
@@ -130,7 +130,7 @@ impl Tunnels {
     pub fn remove(&mut self, dst_id: PublicId, tunnel_id: PublicId) -> bool {
         if let Entry::Occupied(entry) = self.tunnels.entry(dst_id) {
             if entry.get() == &tunnel_id {
-                let _ = entry.remove();
+                entry.remove();
                 return true;
             }
         }
@@ -156,7 +156,7 @@ impl Tunnels {
             .map(|(&dst_id, _)| dst_id)
             .collect_vec();
         for dst_id in &dst_ids {
-            let _ = self.tunnels.remove(dst_id);
+            self.tunnels.remove(dst_id);
         }
         dst_ids
     }

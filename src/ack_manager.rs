@@ -70,7 +70,7 @@ impl AckManager {
     pub fn receive(&mut self, ack: Ack) {
         let _ack = self.pending.remove(&ack);
         // TODO - Should this insert an ack we were not expecting ??
-        let _ = self.received.insert(&ack);
+        self.received.insert(&ack);
     }
 
     /// Did we receive this ack?

@@ -24,6 +24,7 @@ use crust::CrustUser;
 use error::RoutingError;
 use event::Event;
 use id::{FullId, PublicId};
+use ignore_result::Ignore;
 use maidsafe_utilities::serialisation;
 use messages::{DirectMessage, Message};
 use outbox::EventBox;
@@ -80,7 +81,7 @@ impl Bootstrapping {
     ) -> Option<Self> {
         match target_state {
             TargetState::Client { .. } => {
-                let _ = crust_service.start_bootstrap(HashSet::new(), CrustUser::Client);
+                crust_service.start_bootstrap(HashSet::new(), CrustUser::Client);
             }
             TargetState::JoiningNode |
             TargetState::Node { .. } => {
@@ -111,10 +112,10 @@ impl Bootstrapping {
                 warn!("{:?} Cannot handle {:?} - not bootstrapped.", self, action);
                 // TODO: return Err here eventually. Returning Ok for now to
                 // preserve the pre-refactor behaviour.
-                let _ = result_tx.send(Ok(()));
+                result_tx.send(Ok(())).ignore();
             }
             Action::Id { result_tx } => {
-                let _ = result_tx.send(*self.id());
+                result_tx.send(*self.id()).ignore();
             }
             Action::Timeout(token) => self.handle_timeout(token),
             Action::ResourceProofResult(..) => {
@@ -158,7 +159,7 @@ impl Bootstrapping {
                     return Transition::Terminate;
                 }
                 trace!("{:?} Listener started on port {}.", self, port);
-                let _ = self.crust_service.start_bootstrap(
+                self.crust_service.start_bootstrap(
                     HashSet::new(),
                     CrustUser::Node,
                 );
@@ -266,7 +267,7 @@ impl Bootstrapping {
                 debug!("{:?} Received BootstrapConnect from {}.", self, pub_id);
                 // Established connection. Pending Validity checks
                 self.send_bootstrap_request(pub_id);
-                let _ = self.bootstrap_blacklist.insert(socket_addr);
+                self.bootstrap_blacklist.insert(socket_addr);
             }
             Some((bootstrap_id, _)) if bootstrap_id == pub_id => {
                 warn!(
@@ -357,7 +358,7 @@ impl Bootstrapping {
             self,
             pub_id
         );
-        let _ = self.crust_service.disconnect(pub_id);
+        self.crust_service.disconnect(pub_id);
     }
 
     fn rebootstrap(&mut self) {
@@ -373,7 +374,7 @@ impl Bootstrapping {
             } else {
                 CrustUser::Node
             };
-            let _ = self.crust_service.start_bootstrap(
+            self.crust_service.start_bootstrap(
                 self.bootstrap_blacklist.clone(),
                 crust_user,
             );
@@ -448,7 +449,7 @@ mod tests {
         } else {
             panic!("Should have received `ListenerStarted` event.");
         }
-        let _ = crust_service.set_accept_bootstrap(true);
+        crust_service.set_accept_bootstrap(true).ignore();
 
         // Construct a `StateMachine` which will start in the `Bootstrapping` state and bootstrap
         // off the Crust service above.

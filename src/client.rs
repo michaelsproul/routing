@@ -643,10 +643,17 @@ impl Drop for Client {
 impl Drop for Client {
     fn drop(&mut self) {
         self.poll();
+<<<<<<< HEAD
         let _ = self.machine.current_mut().handle_action(
             Action::Terminate,
             &mut self.event_buffer,
         );
         let _ = self.event_buffer.take_all();
+=======
+        self.machine
+            .current_mut()
+            .handle_action(Action::Terminate, &mut self.event_buffer);
+        self.event_buffer.take_all();
+>>>>>>> 46c2c3e... Turn off `unused_results` lint.
     }
 }

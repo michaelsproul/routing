@@ -190,7 +190,7 @@ fn tunnel_clients() {
         false,
     );
     let direct_pair_peer_ids = (nodes[nodes.len() - 1].id(), nodes[nodes.len() - 2].id());
-    let _ = add_a_pair(
+    add_a_pair(
         &network,
         &mut nodes,
         Prefix::new(bit_count, XorName([1u8; XOR_NAME_LEN])),
@@ -225,7 +225,7 @@ fn tunnel_clients() {
 
     // After a split, nodes might reconnect and thereby have each other in Connected state.
     FakeClock::advance_time(CONNECTED_PEER_TIMEOUT_SECS * 1000 + 1);
-    let _ = poll_all(&mut nodes, &mut []);
+    poll_all(&mut nodes, &mut []);
 
     remove_nodes_from_section_till_merge(
         &XorName([64u8; XOR_NAME_LEN]),
@@ -254,7 +254,7 @@ fn tunnel_client_connect_failure() {
     let tunnel_node_index = unwrap!(locate_tunnel_node(&nodes, nodes[2].id(), nodes[3].id()));
 
     network.send_crust_event(Endpoint(2), crust::Event::ConnectFailure(nodes[3].id()));
-    let _ = poll_all(&mut nodes, &mut []);
+    poll_all(&mut nodes, &mut []);
     verify_invariant_for_all_nodes(&mut nodes);
     assert_eq!(
         tunnel_node_index,
@@ -354,7 +354,7 @@ fn tunnel_node_dropped() {
     network.block_connection(Endpoint(2), Endpoint(3));
     network.block_connection(Endpoint(3), Endpoint(2));
     let mut nodes = create_connected_nodes(&network, min_section_size);
-    let _ = poll_all(&mut nodes, &mut []);
+    poll_all(&mut nodes, &mut []);
     verify_invariant_for_all_nodes(&mut nodes);
 
     let id_2 = nodes[2].id();
@@ -365,7 +365,7 @@ fn tunnel_node_dropped() {
     assert_eq!(1, tunnel_node_index);
 
     // Remove Node 1 and expect Node 5 to act as the new tunnel
-    let _ = nodes.remove(tunnel_node_index);
+    nodes.remove(tunnel_node_index);
 
     poll_and_resend(&mut nodes, &mut []);
     expect_any_event!(nodes[1], Event::NodeAdded(..));
@@ -387,7 +387,7 @@ fn tunnel_node_split_out() {
     // Create nodes that don't match node 1 in their first 2 bits.
     let node1_prefix = Prefix::new(bit_count, nodes[1].name());
     let tunnel_clients_prefix = node1_prefix.with_flipped_bit(0).with_flipped_bit(1);
-    let _ = add_a_pair(
+    add_a_pair(
         &network,
         &mut nodes,
         tunnel_clients_prefix,

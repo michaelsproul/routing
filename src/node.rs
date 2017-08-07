@@ -645,11 +645,11 @@ impl Debug for Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        let _ = self.machine.current_mut().handle_action(
+        self.machine.current_mut().handle_action(
             Action::Terminate,
             &mut self.event_buffer,
         );
-        let _ = self.event_buffer.take_all();
+        self.event_buffer.take_all();
     }
 }
 

@@ -200,8 +200,8 @@ impl ExampleNode {
                     data.name(),
                     data
                 );
-                let _ = self.idata_store.insert(*data.name(), data);
-                let _ = self.node.send_put_idata_response(dst, src, Ok(()), msg_id);
+                self.idata_store.insert(*data.name(), data);
+                self.node.send_put_idata_response(dst, src, Ok(()), msg_id);
             }
             Authority::ClientManager(_) => {
                 trace!(
@@ -335,7 +335,7 @@ impl ExampleNode {
             .map(|(client_name, _)| *client_name)
             .collect();
         for client in &deleted_clients {
-            let _ = self.client_accounts.remove(client);
+            self.client_accounts.remove(client);
         }
 
         let deleted_data: Vec<_> = self.idata_store
@@ -344,7 +344,7 @@ impl ExampleNode {
             .map(|(name, _)| *name)
             .collect();
         for id in &deleted_data {
-            let _ = self.idata_store.remove(id);
+            self.idata_store.remove(id);
         }
 
         let deleted_data: Vec<_> = self.mdata_store
@@ -353,7 +353,7 @@ impl ExampleNode {
             .map(|(id, _)| *id)
             .collect();
         for id in &deleted_data {
-            let _ = self.mdata_store.remove(id);
+            self.mdata_store.remove(id);
         }
     }
 
@@ -393,7 +393,7 @@ impl ExampleNode {
                     self.get_debug_name(),
                     client_name
                 );
-                let _ = self.client_accounts.insert(client_name, data);
+                self.client_accounts.insert(client_name, data);
             }
             RefreshContent::ImmutableData(data) => {
                 trace!(
@@ -401,7 +401,7 @@ impl ExampleNode {
                     self.get_debug_name(),
                     data.name()
                 );
-                let _ = self.idata_store.insert(*data.name(), data);
+                self.idata_store.insert(*data.name(), data);
             }
             RefreshContent::MutableData(data) => {
                 trace!(
@@ -410,7 +410,7 @@ impl ExampleNode {
                     data.name(),
                     data.tag()
                 );
-                let _ = self.mdata_store.insert((*data.name(), data.tag()), data);
+                self.mdata_store.insert((*data.name(), data.tag()), data);
             }
         }
     }

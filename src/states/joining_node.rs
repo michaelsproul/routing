@@ -26,6 +26,7 @@ use event::Event;
 #[cfg(feature = "use-mock-crust")]
 use fake_clock::FakeClock as Instant;
 use id::{FullId, PublicId};
+use ignore_result::Ignore;
 use maidsafe_utilities::serialisation;
 use messages::{HopMessage, Message, MessageContent, RoutingMessage, SignedMessage};
 use outbox::EventBox;
@@ -106,10 +107,10 @@ impl JoiningNode {
             Action::ClientSendRequest { ref result_tx, .. } |
             Action::NodeSendMessage { ref result_tx, .. } => {
                 warn!("{:?} Cannot handle {:?} - not joined.", self, action);
-                let _ = result_tx.send(Err(InterfaceError::InvalidState));
+                result_tx.send(Err(InterfaceError::InvalidState)).ignore();
             }
             Action::Id { result_tx } => {
-                let _ = result_tx.send(*self.id());
+                result_tx.send(*self.id()).ignore();
             }
             Action::Timeout(token) => {
                 if let Transition::Terminate = self.handle_timeout(token, outbox) {

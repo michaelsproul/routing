@@ -60,8 +60,8 @@ fn drop_random_nodes<R: Rng>(
             if *nodes[i].routing_table().our_prefix() != prefix {
                 continue;
             }
-            let _ = dropped_nodes.insert(nodes[i].name());
-            let _ = nodes.remove(i);
+            dropped_nodes.insert(nodes[i].name());
+            nodes.remove(i);
             removed += 1;
         }
     } else {
@@ -71,8 +71,8 @@ fn drop_random_nodes<R: Rng>(
         let mut removed = 0;
         while num_excess - removed > 0 {
             let index = gen_range(rng, 0, len - removed);
-            let _ = dropped_nodes.insert(nodes[index].name());
-            let _ = nodes.remove(index);
+            dropped_nodes.insert(nodes[index].name());
+            nodes.remove(index);
             removed += 1;
         }
     }
@@ -115,7 +115,7 @@ fn add_node_and_poll<R: Rng>(
         let block_peer = gen_range_except(rng, 1, nodes.len(), &exclude);
 
         // Status to the proxy of the new node doesn't matter.
-        let _ = dropped_nodes.insert(nodes[proxy].name());
+        dropped_nodes.insert(nodes[proxy].name());
         if nodes[block_peer].inner.has_unnormalised_routing_conn(
             &dropped_nodes,
         )
@@ -177,9 +177,9 @@ fn random_churn<R: Rng>(
     let len = nodes.len();
 
     if count_sections(nodes) > 1 && rng.gen_weighted_bool(3) {
-        let _ = nodes.remove(gen_range(rng, 1, len));
-        let _ = nodes.remove(gen_range(rng, 1, len - 1));
-        let _ = nodes.remove(gen_range(rng, 1, len - 2));
+        nodes.remove(gen_range(rng, 1, len));
+        nodes.remove(gen_range(rng, 1, len - 1));
+        nodes.remove(gen_range(rng, 1, len - 2));
 
         None
     } else {
@@ -308,7 +308,7 @@ impl ExpectedPuts {
                 .filter(is_recipient)
                 .map(TestNode::name)
                 .collect();
-            let _ = self.sections.insert(dst, section);
+            self.sections.insert(dst, section);
         }
         self.messages.insert(key);
     }
@@ -622,7 +622,7 @@ fn aggressive_churn() {
             "Dropping random nodes.  Current node count: {}",
             nodes.len()
         );
-        let _ = drop_random_nodes(&mut rng, &mut nodes, min_section_size);
+        drop_random_nodes(&mut rng, &mut nodes, min_section_size);
         poll_and_resend(&mut nodes, &mut []);
         verify_invariant_for_all_nodes(&mut nodes);
         verify_section_list_signatures(&nodes);

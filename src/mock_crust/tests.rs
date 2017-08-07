@@ -21,6 +21,7 @@ use super::crust::{CrustEventSender, CrustUser, Service};
 use super::support::{Config, Network, to_socket_addr};
 use CrustEvent;
 use id::{FullId, PublicId};
+use ignore_result::Ignore;
 use maidsafe_utilities::event_sender::{MaidSafeEventCategory, MaidSafeObserver};
 use std::collections::HashSet;
 use std::sync::mpsc::{self, Receiver};
@@ -79,7 +80,7 @@ fn start_two_services_bootstrap_communicate_exit() {
     expect_event!(event_rx_0, CrustEvent::ListenerStarted::<PublicId>(..));
 
     service_0.start_service_discovery();
-    let _ = service_0.set_accept_bootstrap(true);
+    service_0.set_accept_bootstrap(true).ignore();
 
     let mut service_1 = unwrap!(Service::with_handle(
         &handle1,
@@ -252,7 +253,7 @@ fn drop() {
 
     unwrap!(service_0.start_listening_tcp());
     expect_event!(event_rx_0, CrustEvent::ListenerStarted::<PublicId>(_));
-    let _ = service_0.set_accept_bootstrap(true);
+    service_0.set_accept_bootstrap(true).ignore();
 
     let mut service_1 = unwrap!(Service::with_handle(&handle1,
                                                      event_sender_1,

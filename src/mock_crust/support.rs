@@ -143,7 +143,7 @@ impl<UID: Uid> Network<UID> {
     /// Make all packets from `sender` to `receiver` succeed.
     pub fn unblock_connection(&self, sender: Endpoint, receiver: Endpoint) {
         let mut imp = self.0.borrow_mut();
-        let _ = imp.blocked_connections.remove(&(sender, receiver));
+        imp.blocked_connections.remove(&(sender, receiver));
     }
 
     /// Delay the processing of packets from `sender` to `receiver`.
@@ -171,7 +171,7 @@ impl<UID: Uid> Network<UID> {
             "Cannot fetch service of {:?}.",
             node_2
         );
-        let _ = service_2.borrow_mut().remove_connection_by_endpoint(node_1);
+        service_2.borrow_mut().remove_connection_by_endpoint(node_1);
 
         service_1.borrow_mut().send_event(CrustEvent::LostPeer(
             unwrap!(service_2.borrow().uid),
@@ -223,7 +223,7 @@ impl<UID: Uid> Network<UID> {
     // Drops any pending messages on a specific route (does not automatically
     // drop packets going the other way).
     fn drop_pending(&self, sender: Endpoint, receiver: Endpoint) {
-        let _ = self.0.borrow_mut().queue.remove(&(sender, receiver));
+        self.0.borrow_mut().queue.remove(&(sender, receiver));
     }
 
     fn pop_packet(&self) -> Option<(Endpoint, Endpoint, Packet<UID>)> {

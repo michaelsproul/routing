@@ -23,6 +23,7 @@
 use super::{Error, RoutingTable};
 use super::authority::Authority;
 use super::prefix::Prefix;
+use ignore_result::Ignore;
 use maidsafe_utilities::SeededRng;
 use rand::Rng;
 use routing_table::{OwnMergeState, Sections};
@@ -91,22 +92,22 @@ impl Network {
                 trace!("failed to add node with error {:?}", e);
             }
             if node.should_split() {
-                let _ = split_prefixes.insert(node.our_versioned_prefix());
+                split_prefixes.insert(node.our_versioned_prefix());
             }
             if let Err(e) = new_table.add(*node.our_name()) {
                 trace!("failed to add node into new with error {:?}", e);
             }
             if new_table.should_split() {
                 let ver_pfx = new_table.our_versioned_prefix();
-                let _ = split_prefixes.insert(ver_pfx);
-                let _ = new_table.split(ver_pfx);
+                split_prefixes.insert(ver_pfx);
+                new_table.split(ver_pfx);
             }
         }
 
         assert!(self.nodes.insert(name, new_table).is_none());
         for &ver_pfx in &split_prefixes {
             for node in self.nodes.values_mut() {
-                let _ = node.split(ver_pfx);
+                node.split(ver_pfx);
             }
         }
     }
@@ -120,7 +121,7 @@ impl Network {
             assert_eq!(new_info, *content);
             return;
         }
-        let _ = merge_info.insert(prefix, new_info);
+        merge_info.insert(prefix, new_info);
     }
 
     // TODO: remove this when https://github.com/Manishearth/rust-clippy/issues/1279 is resolved
@@ -129,7 +130,7 @@ impl Network {
     fn drop_node(&mut self) {
         let keys = self.keys();
         let name = *unwrap!(self.rng.choose(&keys));
-        let _ = self.nodes.remove(&name);
+        self.nodes.remove(&name);
         let mut merge_own_info: BTreeMap<Prefix<u64>, Sections<u64>> = BTreeMap::new();
         // TODO: needs to verify how to broadcasting such info
         for node in self.nodes.values_mut() {
@@ -217,7 +218,7 @@ impl Network {
                     let contacts = target_node.merge_other_section(ver_pfx, section.clone());
                     // add missing contacts
                     for contact in contacts {
-                        let _ = target_node.add(contact);
+                        target_node.add(contact).ignore();
                     }
                     if target_node.should_merge() {
                         Network::store_merge_info(
@@ -368,7 +369,7 @@ where
                 );
                 continue;
             }
-            let _ = sections.insert(prefix, (node.our_name, section_content));
+            sections.insert(prefix, (node.our_name, section_content));
         }
     }
     // check that prefixes are disjoint

@@ -15,12 +15,12 @@
 // Please review the Licences for the specific language governing permissions and limitations
 // relating to use of the SAFE Network Software.
 
-
 pub use self::implementation::Timer;
 
 #[cfg(not(feature = "use-mock-crust"))]
 mod implementation {
     use action::Action;
+    use ignore_result::Ignore;
     use itertools::Itertools;
     use maidsafe_utilities::thread::{self, Joiner};
     use std::cell::RefCell;
@@ -121,7 +121,7 @@ mod implementation {
                     // `deadlines`.
                     let tokens = deadlines.remove(&expired).expect("Bug in `BTreeMap`.");
                     for token in tokens {
-                        let _ = sender.send(Action::Timeout(token));
+                        sender.send(Action::Timeout(token)).ignore();
                     }
                 }
             }
@@ -207,7 +207,7 @@ mod implementation {
                 // Add deadline and check that dropping `timer` doesn't fire a timeout notification,
                 // and that dropping doesn't block until the deadline has expired.
                 instant_when_added = Instant::now();
-                let _ = timer.schedule(interval);
+                timer.schedule(interval);
             }
 
             assert!(
@@ -231,7 +231,7 @@ mod implementation {
             );
             let timer = Timer::new(sender);
             for _ in 0..1000 {
-                let _ = timer.schedule(Duration::new(0, 3000));
+                timer.schedule(Duration::new(0, 3000));
             }
         }
     }

@@ -51,9 +51,18 @@ impl SectionListCache {
         if let Some(pub_id) = pub_id_opt {
             if let Some(lists) = self.signed_by.remove(&pub_id) {
                 for (prefix, list) in lists {
-                    let _ = self.signatures.get_mut(&prefix).and_then(|map| {
+<<<<<<< HEAD
+                    self.signatures.get_mut(&prefix).and_then(|map| {
                         map.get_mut(&list).and_then(|sigmap| sigmap.remove(&pub_id))
                     });
+=======
+                    self.signatures
+                        .get_mut(&prefix)
+                        .and_then(|map| {
+                                      map.get_mut(&list)
+                                          .and_then(|sigmap| sigmap.remove(&pub_id))
+                                  });
+>>>>>>> 46c2c3e... Turn off `unused_results` lint.
                 }
                 self.prune();
                 self.update_lists_cache(our_section_size);
@@ -73,12 +82,12 @@ impl SectionListCache {
         // remove all conflicting signatures
         self.remove_signatures_for_prefix_by(prefix, pub_id);
         // remember that this public id signed this section list
-        let _ = self.signed_by
+        self.signed_by
             .entry(pub_id)
             .or_insert_with(HashMap::new)
             .insert(prefix, list.clone());
         // remember that this section list has a new signature
-        let _ = self.signatures
+        self.signatures
             .entry(prefix)
             .or_insert_with(HashMap::new)
             .entry(list)
@@ -116,7 +125,7 @@ impl SectionListCache {
                 .map(|(list, _)| list.clone())
                 .collect_vec();
             for list in lists_to_remove {
-                let _ = map.remove(&list);
+                map.remove(&list);
             }
             if map.is_empty() {
                 to_remove.push(*prefix);
@@ -124,10 +133,10 @@ impl SectionListCache {
         }
         // prune prefixes with no section lists
         for prefix in to_remove {
-            let _ = self.signatures.remove(&prefix);
+            self.signatures.remove(&prefix);
             // if we lose a prefix from `signatures`, there is no point in holding it in
             // `lists_cache`
-            let _ = self.lists_cache.remove(&prefix);
+            self.lists_cache.remove(&prefix);
         }
 
         let to_remove = self.signed_by
@@ -137,7 +146,7 @@ impl SectionListCache {
             .collect_vec();
         // prune pub_ids signing nothing
         for pub_id in to_remove {
-            let _ = self.signed_by.remove(&pub_id);
+            self.signed_by.remove(&pub_id);
         }
     }
 
@@ -152,10 +161,15 @@ impl SectionListCache {
                 if sig_count * QUORUM_DENOMINATOR > our_section_size * QUORUM_NUMERATOR {
                     // we have a list with a quorum of signatures
                     let signatures = unwrap!(map.get(list));
-                    let _ = self.lists_cache.insert(
+<<<<<<< HEAD
+                    self.lists_cache.insert(
                         *prefix,
                         (list.clone(), signatures.clone()),
                     );
+=======
+                    self.lists_cache
+                        .insert(*prefix, (list.clone(), signatures.clone()));
+>>>>>>> 46c2c3e... Turn off `unused_results` lint.
                 }
             }
         }
@@ -172,14 +186,14 @@ impl SectionListCache {
             .collect_vec();
         for (prefix, list) in to_remove {
             // remove the signatures from self.signatures
-            let _ = self.signatures.get_mut(&prefix).map_or(None, |map| {
+            self.signatures.get_mut(&prefix).map_or(None, |map| {
                 map.get_mut(&list).map_or(
                     None,
                     |sigmap| sigmap.remove(&author),
                 )
             });
             // remove those entries from self.signed_by
-            let _ = self.signed_by.get_mut(&author).map_or(
+            self.signed_by.get_mut(&author).map_or(
                 None,
                 |map| map.remove(&prefix),
             );

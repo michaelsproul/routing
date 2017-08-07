@@ -88,7 +88,7 @@ impl SignatureAccumulator {
                 for (pub_id, sig) in self.sigs.remove(&hash).into_iter().flat_map(|(vec, _)| vec) {
                     msg.add_signature(pub_id, sig);
                 }
-                let _ = entry.insert((msg, route, Instant::now()));
+                entry.insert((msg, route, Instant::now()));
             }
         }
         self.remove_if_complete(min_section_size, &hash)
@@ -103,7 +103,7 @@ impl SignatureAccumulator {
             .map(|(hash, _)| *hash)
             .collect_vec();
         for hash in expired_sigs {
-            let _ = self.sigs.remove(&hash);
+            self.sigs.remove(&hash);
         }
         let expired_msgs = self.msgs
             .iter()
@@ -113,7 +113,7 @@ impl SignatureAccumulator {
             .map(|(hash, _)| *hash)
             .collect_vec();
         for hash in expired_msgs {
-            let _ = self.msgs.remove(&hash);
+            self.msgs.remove(&hash);
         }
     }
 
@@ -201,7 +201,7 @@ mod tests {
             let mut other_ids = vec![];
             for _ in 0..8 {
                 let full_id = FullId::new();
-                let _ = pub_ids.insert(*full_id.public_id());
+                pub_ids.insert(*full_id.public_id());
                 other_ids.push(full_id);
             }
             let msgs_and_sigs = (0..5)

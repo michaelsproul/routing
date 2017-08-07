@@ -60,7 +60,7 @@ fn disconnect_on_rebootstrap() {
             .endpoint(Endpoint(2))
             .create(),
     );
-    let _ = poll_all(&mut nodes, &mut []);
+    poll_all(&mut nodes, &mut []);
     // When retrying to bootstrap, we should have disconnected from the bootstrap node.
     assert!(!unwrap!(nodes.last()).handle.is_connected(&nodes[1].handle));
     expect_next_event!(unwrap!(nodes.last_mut()), Event::Terminate);
@@ -85,7 +85,7 @@ fn more_than_section_size_nodes() {
 fn client_connects_to_nodes() {
     let network = Network::new(MIN_SECTION_SIZE, None);
     let mut nodes = create_connected_nodes(&network, MIN_SECTION_SIZE + 1);
-    let _ = create_connected_clients(&network, &mut nodes, 1);
+    create_connected_clients(&network, &mut nodes, 1);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn node_joins_in_front() {
             .create(),
     );
 
-    let _ = poll_all(&mut nodes, &mut []);
+    poll_all(&mut nodes, &mut []);
 
     verify_invariant_for_all_nodes(&mut nodes);
 }
@@ -126,7 +126,7 @@ fn multiple_joining_nodes() {
         }
 
         poll_and_resend(&mut nodes, &mut []);
-        let _ = remove_nodes_which_failed_to_connect(&mut nodes, count);
+        remove_nodes_which_failed_to_connect(&mut nodes, count);
         verify_invariant_for_all_nodes(&mut nodes);
     }
 }
@@ -200,7 +200,7 @@ fn routing_conn_normalise() {
         |node: &TestNode| node.inner.has_unnormalised_routing_conn(&BTreeSet::new());
     assert!(nodes.iter().all(has_unnormalised_conn));
     FakeClock::advance_time(JOINING_NODE_TIMEOUT_SECS * 1000);
-    let _ = poll_all(&mut nodes, &mut []);
+    poll_all(&mut nodes, &mut []);
     let no_unnormalised_conn =
         |node: &TestNode| !node.inner.has_unnormalised_routing_conn(&BTreeSet::new());
     assert!(nodes.iter().all(no_unnormalised_conn));

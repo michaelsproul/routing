@@ -119,6 +119,7 @@ pub use self::error::Error;
 pub use self::network_tests::verify_network_invariant;
 pub use self::prefix::{Prefix, VersionedPrefix};
 pub use self::xorable::Xorable;
+use ignore_result::Ignore;
 use itertools::Itertools;
 use log::LogLevel;
 use std::{iter, mem};
@@ -273,7 +274,7 @@ impl<T: Binary + Clone + Copy + Debug + Default + Hash + Xorable> RoutingTable<T
                 .collect(),
         )?;
         for peer in sections.values().flat_map(BTreeSet::iter) {
-            let _ = temp_rt.add(*peer);
+            temp_rt.add(*peer).ignore();
         }
         temp_rt.check_invariant(false, true)
     }

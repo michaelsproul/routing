@@ -170,7 +170,7 @@ impl RateLimiter {
             // Record the overcharge amount in the `overcharged` container. If an entry already
             // exists, we leave it as is. This means that *at most 1* refund is applied if multiple
             // messages are sent with the same `msg_id`.
-            let _ = self.overcharged.entry(*msg_id).or_insert(bytes_to_add);
+            self.overcharged.entry(*msg_id).or_insert(bytes_to_add);
         }
 
         let _ = self.used.insert(*client_ip, new_balance);
@@ -282,7 +282,7 @@ impl RateLimiter {
             let quota = cmp::min(used, leaked_units / (leaking_client_count - index) as u64);
             leaked_units -= quota;
             if used > quota {
-                let _ = self.used.insert(client, used - quota);
+                self.used.insert(client, used - quota);
             }
         }
     }
