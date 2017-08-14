@@ -693,14 +693,14 @@ mod tests {
     #[test]
     fn many_clients() {
         let mut rate_limiter = RateLimiter::new(false);
-        let num_clients = 50;
+        let num_clients = 100;
         let mut clients_and_counts = (0..num_clients)
             .map(|i| (IpAddr::from([i, i, i, i]), 0))
             .collect::<BTreeMap<_, _>>();
         let mut rng = SeededRng::thread_rng();
 
         let start = FakeClock::now();
-        for _ in 0..200 {
+        for _ in 0..500 {
             // Each client tries to add a large request and increments its count on success.
             for (client, count) in &mut clients_and_counts {
                 if add_user_msg_part(&mut rate_limiter, client, &random_payload()).is_ok() {
@@ -711,12 +711,13 @@ mod tests {
         }
 
         // Check that all clients have managed to add the same number of messages.
-        let advanced_secs = (FakeClock::now() - start).as_secs() + 1;
-        let success_count = (advanced_secs * RATE as u64) /
-            (MAX_IMMUTABLE_DATA_SIZE_IN_BYTES * num_clients as u64);
+        let elapsed = FakeClock::now() - start;
+        let advanced_secs = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1E9;
+        let numerator = MIN_CLIENT_CAPACITY as f64 * num_clients as f64 + advanced_secs * RATE;
+        let denominator = MAX_IMMUTABLE_DATA_SIZE_IN_BYTES as f64 * num_clients as f64;
+        let success_count = (numerator / denominator) as u64;
         for count in clients_and_counts.values() {
-            // Allow difference of 1 to accommodate for rounding errors.
-            assert!((*count as i64 - success_count as i64).abs() <= 1);
+            assert_eq!(*count, success_count);
         }
     }
 
