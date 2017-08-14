@@ -700,14 +700,16 @@ mod tests {
         let mut rng = SeededRng::thread_rng();
 
         let start = FakeClock::now();
-        for _ in 0..200 {
+        for i in 0..200 {
             // Each client tries to add a large request and increments its count on success.
             for (client, count) in &mut clients_and_counts {
                 if add_user_msg_part(&mut rate_limiter, client, &random_payload()).is_ok() {
                     *count += 1;
                 }
             }
-            FakeClock::advance_time(rng.gen_range(500, 1500));
+            if i != 199 {
+                FakeClock::advance_time(rng.gen_range(500, 1500));
+            }
         }
 
         // Check that all clients have managed to add the same number of messages.
@@ -716,7 +718,8 @@ mod tests {
             (MAX_IMMUTABLE_DATA_SIZE_IN_BYTES * num_clients as u64);
         for count in clients_and_counts.values() {
             // Allow difference of 1 to accommodate for rounding errors.
-            assert!((*count as i64 - success_count as i64).abs() <= 1);
+            //assert!((*count as i64 - success_count as i64).abs() <= 1);
+            assert_eq!(*count, success_count);
         }
     }
 
