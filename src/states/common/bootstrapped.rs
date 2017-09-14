@@ -25,7 +25,6 @@ use maidsafe_utilities::serialisation;
 use messages::{HopMessage, Message, MessageContent, RoutingMessage, SignedMessage};
 use routing_message_filter::RoutingMessageFilter;
 use routing_table::Authority;
-use std::collections::BTreeSet;
 use std::time::Duration;
 #[cfg(not(feature = "use-mock-crust"))]
 use std::time::Instant;
@@ -185,18 +184,8 @@ pub trait Bootstrapped: Base {
     }
 
     // Serialise HopMessage containing the given signed message.
-    fn to_hop_bytes(
-        &self,
-        signed_msg: SignedMessage,
-        route: u8,
-        sent_to: BTreeSet<XorName>,
-    ) -> Result<Vec<u8>, RoutingError> {
-        let hop_msg = HopMessage::new(
-            signed_msg,
-            route,
-            sent_to,
-            self.full_id().signing_private_key(),
-        )?;
+    fn to_hop_bytes(&self, signed_msg: SignedMessage, route: u8) -> Result<Vec<u8>, RoutingError> {
+        let hop_msg = HopMessage::new(signed_msg, route, self.full_id().signing_private_key())?;
         let message = Message::Hop(hop_msg);
         Ok(serialisation::serialise(&message)?)
     }

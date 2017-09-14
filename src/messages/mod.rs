@@ -194,8 +194,6 @@ pub struct HopMessage {
     /// Route number; corresponds to the index of the peer in the section of target peers being
     /// considered for the next hop.
     pub route: u8,
-    /// Every node this has already been sent to.
-    pub sent_to: BTreeSet<XorName>,
     /// Signature to be validated against the neighbouring sender's public key.
     signature: sign::Signature,
 }
@@ -205,14 +203,12 @@ impl HopMessage {
     pub fn new(
         content: SignedMessage,
         route: u8,
-        sent_to: BTreeSet<XorName>,
         signing_key: &sign::SecretKey,
     ) -> Result<HopMessage, RoutingError> {
         let bytes_to_sign = serialise(&content)?;
         Ok(HopMessage {
             content: content,
             route: route,
-            sent_to: sent_to,
             signature: sign::sign_detached(&bytes_to_sign, signing_key),
         })
     }
@@ -744,7 +740,7 @@ impl Debug for HopMessage {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         write!(
             formatter,
-            "HopMessage {{ content: {:?}, route: {}, sent_to: .., signature: .. }}",
+            "HopMessage {{ content: {:?}, route: {}, signature: .. }}",
             self.content,
             self.route
         )

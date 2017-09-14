@@ -438,11 +438,7 @@ impl Bootstrapped for JoiningNode {
         if self.add_to_pending_acks(signed_msg.routing_message(), route, expires_at) &&
             !self.filter_outgoing_routing_msg(signed_msg.routing_message(), &proxy_pub_id, route)
         {
-            let bytes = self.to_hop_bytes(
-                signed_msg.clone(),
-                route,
-                BTreeSet::new(),
-            )?;
+            let bytes = self.to_hop_bytes(signed_msg.clone(), route)?;
             self.send_or_drop(&proxy_pub_id, bytes, signed_msg.priority());
         }
 
