@@ -19,27 +19,46 @@
 use fake_clock::FakeClock as Instant;
 use id::PublicId;
 use itertools::Itertools;
-use maidsafe_utilities::serialisation;
-use messages::SignedMessage;
 use rust_sodium::crypto::sign;
 use sha3::Digest256;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::fmt::Debug;
 #[cfg(not(feature = "use-mock-crust"))]
 use std::time::Instant;
-use tiny_keccak::sha3_256;
 
 /// Time (in seconds) within which a message and a quorum of signatures need to arrive to
 /// accumulate.
 pub const ACCUMULATION_TIMEOUT_SECS: u64 = 30;
 
-#[derive(Default)]
-pub struct SignatureAccumulator {
-    sigs: HashMap<Digest256, (Vec<(PublicId, sign::Signature)>, Instant)>,
-    msgs: HashMap<Digest256, (SignedMessage, u8, Instant)>,
+pub trait Signed: Debug {
+    /// Calculates the SHA3 digest of the object
+    fn digest(&self) -> Option<Digest256>;
+
+    /// Checks whether the object has a quorum of signatures
+    fn check_fully_signed(&mut self, min_section_size: usize) -> bool;
+
+    /// Adds the given signature if it is new, without validating it.
+    fn add_signature(&mut self, pub_id: PublicId, sig: sign::Signature);
+
+    /// Adds all signatures from the given object, without validating them.
+    fn add_signatures(&mut self, other: Self);
 }
 
-impl SignatureAccumulator {
+pub struct SignatureAccumulator<T: Signed> {
+    sigs: HashMap<Digest256, (Vec<(PublicId, sign::Signature)>, Instant)>,
+    msgs: HashMap<Digest256, (T, Instant)>,
+}
+
+impl<T: Signed> SignatureAccumulator<T> {
+    /// Creates a new SignatureAccumulator
+    pub fn new() -> SignatureAccumulator<T> {
+        SignatureAccumulator {
+            sigs: HashMap::new(),
+            msgs: HashMap::new(),
+        }
+    }
+
     /// Adds the given signature to the list of pending signatures or to the appropriate
     /// `SignedMessage`. Returns the message, if it has enough signatures now.
     pub fn add_signature(
@@ -48,9 +67,9 @@ impl SignatureAccumulator {
         hash: Digest256,
         sig: sign::Signature,
         pub_id: PublicId,
-    ) -> Option<(SignedMessage, u8)> {
+    ) -> Option<T> {
         self.remove_expired();
-        if let Some(&mut (ref mut msg, _, _)) = self.msgs.get_mut(&hash) {
+        if let Some(&mut (ref mut msg, _)) = self.msgs.get_mut(&hash) {
             msg.add_signature(pub_id, sig);
         } else {
             let mut sigs_vec = self.sigs.entry(hash).or_insert_with(
@@ -64,31 +83,20 @@ impl SignatureAccumulator {
 
     /// Adds the given message to the list of pending messages. Returns it if it has enough
     /// signatures.
-    pub fn add_message(
-        &mut self,
-        mut msg: SignedMessage,
-        min_section_size: usize,
-        route: u8,
-    ) -> Option<(SignedMessage, u8)> {
+    pub fn add_message(&mut self, mut msg: T, min_section_size: usize) -> Option<T> {
         self.remove_expired();
-        let hash = match serialisation::serialise(msg.routing_message()) {
-            Ok(serialised_msg) => sha3_256(&serialised_msg),
-            Err(err) => {
-                error!("Failed to serialise {:?}: {:?}.", msg, err);
-                return None;
-            }
-        };
+        let hash = unwrap!(msg.digest());
         match self.msgs.entry(hash) {
             Entry::Occupied(mut entry) => {
                 // TODO - should update `route` of `entry`?
-                trace!("Received two full SignedMessages {:?}.", msg);
+                trace!("Received two full messages {:?}.", msg);
                 entry.get_mut().0.add_signatures(msg);
             }
             Entry::Vacant(entry) => {
                 for (pub_id, sig) in self.sigs.remove(&hash).into_iter().flat_map(|(vec, _)| vec) {
                     msg.add_signature(pub_id, sig);
                 }
-                let _ = entry.insert((msg, route, Instant::now()));
+                let _ = entry.insert((msg, Instant::now()));
             }
         }
         self.remove_if_complete(min_section_size, &hash)
@@ -107,7 +115,7 @@ impl SignatureAccumulator {
         }
         let expired_msgs = self.msgs
             .iter()
-            .filter(|&(_, &(_, _, ref time))| {
+            .filter(|&(_, &(_, ref time))| {
                 time.elapsed().as_secs() > ACCUMULATION_TIMEOUT_SECS
             })
             .map(|(hash, _)| *hash)
@@ -117,20 +125,16 @@ impl SignatureAccumulator {
         }
     }
 
-    fn remove_if_complete(
-        &mut self,
-        min_section_size: usize,
-        hash: &Digest256,
-    ) -> Option<(SignedMessage, u8)> {
+    fn remove_if_complete(&mut self, min_section_size: usize, hash: &Digest256) -> Option<T> {
         match self.msgs.get_mut(hash) {
             None => return None,
-            Some(&mut (ref mut msg, _, _)) => {
+            Some(&mut (ref mut msg, _)) => {
                 if !msg.check_fully_signed(min_section_size) {
                     return None;
                 }
             }
         }
-        self.msgs.remove(hash).map(|(msg, route, _)| (msg, route))
+        self.msgs.remove(hash).map(|(msg, _)| msg)
     }
 }
 
@@ -224,7 +228,7 @@ mod tests {
 
     #[test]
     fn section_src_add_message_last() {
-        let mut sig_accumulator = SignatureAccumulator::default();
+        let mut sig_accumulator = SignatureAccumulator::new();
         let env = Env::new();
 
         // Add all signatures for all messages - none should accumulate.
@@ -262,15 +266,12 @@ mod tests {
         env.msgs_and_sigs.iter().foreach(|msg_and_sigs| {
             expected_sigs_count -= 1;
             let signed_msg = msg_and_sigs.signed_msg.clone();
-            let route = rand::random();
-            let (mut returned_msg, returned_route) = unwrap!(sig_accumulator.add_message(
+            let mut returned_msg = unwrap!(sig_accumulator.add_message(
                 signed_msg.clone(),
                 env.num_nodes(),
-                route,
             ));
             assert_eq!(sig_accumulator.sigs.len(), expected_sigs_count);
             assert!(sig_accumulator.msgs.is_empty());
-            assert_eq!(route, returned_route);
             assert_eq!(signed_msg.routing_message(), returned_msg.routing_message());
             unwrap!(returned_msg.check_integrity(1000));
             assert!(returned_msg.check_fully_signed(env.num_nodes()));
@@ -282,14 +283,13 @@ mod tests {
 
     #[test]
     fn section_src_add_signature_last() {
-        let mut sig_accumulator = SignatureAccumulator::default();
+        let mut sig_accumulator = SignatureAccumulator::new();
         let env = Env::new();
 
         // Add each message with the section list added - none should accumulate.
-        env.msgs_and_sigs.iter().enumerate().foreach(|(route,
-          msg_and_sigs)| {
+        env.msgs_and_sigs.iter().foreach(|msg_and_sigs| {
             let signed_msg = msg_and_sigs.signed_msg.clone();
-            let result = sig_accumulator.add_message(signed_msg, env.num_nodes(), route as u8);
+            let result = sig_accumulator.add_message(signed_msg, env.num_nodes());
             assert!(result.is_none());
         });
         let mut expected_msgs_count = env.msgs_and_sigs.len();
@@ -297,8 +297,7 @@ mod tests {
         assert!(sig_accumulator.sigs.is_empty());
 
         // Add each message's signatures - each should accumulate once quorum has been reached.
-        env.msgs_and_sigs.iter().enumerate().foreach(|(route,
-          msg_and_sigs)| {
+        env.msgs_and_sigs.iter().foreach(|msg_and_sigs| {
             msg_and_sigs
                 .signature_msgs
                 .iter()
@@ -316,10 +315,9 @@ mod tests {
                         ref unexpected_msg => panic!("Unexpected message: {:?}", unexpected_msg),
                     };
 
-                    if let Some((mut returned_msg, returned_route)) = result {
+                    if let Some(mut returned_msg) = result {
                         expected_msgs_count -= 1;
                         assert_eq!(sig_accumulator.msgs.len(), expected_msgs_count);
-                        assert_eq!(route as u8, returned_route);
                         assert_eq!(
                             msg_and_sigs.signed_msg.routing_message(),
                             returned_msg.routing_message()

@@ -101,7 +101,7 @@ pub struct Node {
     peer_mgr: PeerManager,
     response_cache: Box<Cache>,
     routing_msg_filter: RoutingMessageFilter,
-    sig_accumulator: SignatureAccumulator,
+    sig_accumulator: SignatureAccumulator<SignedMessage>,
     section_list_sigs: SectionListCache,
     stats: Stats,
     tick_timer_token: u64,
@@ -251,7 +251,7 @@ impl Node {
             ),
             response_cache: cache,
             routing_msg_filter: RoutingMessageFilter::new(),
-            sig_accumulator: Default::default(),
+            sig_accumulator: SignatureAccumulator::new(),
             section_list_sigs: SectionListCache::new(),
             stats: stats,
             tick_timer_token: tick_timer_token,
@@ -834,16 +834,15 @@ impl Node {
         }
 
         let min_section_size = self.min_section_size();
-        if let Some((signed_msg, route)) =
-            self.sig_accumulator.add_signature(
-                min_section_size,
-                digest,
-                sig,
-                pub_id,
-            )
+        if let Some(signed_msg) = self.sig_accumulator.add_signature(
+            min_section_size,
+            digest,
+            sig,
+            pub_id,
+        )
         {
             let hop = *self.name(); // we accumulated the message, so now we act as the last hop
-            self.handle_signed_message(signed_msg, route, hop)?;
+            self.handle_signed_message(signed_msg, 0, hop)?; // TODO: get rid of the route
         }
         Ok(())
     }
@@ -3880,10 +3879,7 @@ impl Node {
             if node == *self.full_id.public_id() {
                 continue;
             }
-            self.send_direct_message(
-                node,
-                DirectMessage::RelayMessage(signed_message.clone())
-            );
+            self.send_direct_message(node, DirectMessage::RelayMessage(signed_message.clone()));
         }
 
         // TODO: also broadcast signatures to our own section
@@ -3891,7 +3887,11 @@ impl Node {
         Ok(())
     }
 
-    fn send_per_hop_ack(&mut self, message: &SignedMessage, sent_by: PublicId) -> Result<(), RoutingError> {
+    fn send_per_hop_ack(
+        &mut self,
+        message: &SignedMessage,
+        sent_by: PublicId,
+    ) -> Result<(), RoutingError> {
         let message_hash = Ack::compute(message.routing_message())?.get_hash();
         let ack_data = serialisation::serialise(&(message_hash, sent_by))?;
         let signature = sign::sign_detached(&ack_data, self.full_id.signing_private_key());
@@ -3902,13 +3902,17 @@ impl Node {
                 message_hash,
                 delegate_id: sent_by,
                 signature,
-            }
+            },
         );
 
         Ok(())
     }
 
-    fn handle_relayed_message(&mut self, message: SignedMessage, sent_by: PublicId) -> Result<(), RoutingError> {
+    fn handle_relayed_message(
+        &mut self,
+        message: SignedMessage,
+        sent_by: PublicId,
+    ) -> Result<(), RoutingError> {
         message.check_integrity(self.min_section_size())?;
 
         // Send an ACK back to the delegate from the previous hop.
@@ -4082,12 +4086,10 @@ impl Bootstrapped for Node {
             None => Ok(()),
             Some(delegate_node) if delegate_node == *self.name() => {
                 let min_section_size = self.min_section_size();
-                if let Some((msg, _)) =
-                    self.sig_accumulator.add_message(
-                        signed_msg,
-                        min_section_size,
-                        route,
-                    )
+                if let Some(msg) = self.sig_accumulator.add_message(
+                    signed_msg,
+                    min_section_size,
+                )
                 {
                     // TODO: maybe handle this message as well if we are the recipient?
                     self.relay_signed_message(msg)?;
@@ -4173,12 +4175,10 @@ impl Bootstrapped for Node {
             None => Ok(()),
             Some(our_name) if our_name == *self.name() => {
                 let min_section_size = self.min_section_size();
-                if let Some((msg, route)) =
-                    self.sig_accumulator.add_message(
-                        signed_msg,
-                        min_section_size,
-                        route,
-                    )
+                if let Some(msg) = self.sig_accumulator.add_message(
+                    signed_msg,
+                    min_section_size,
+                )
                 {
                     if self.in_authority(&msg.routing_message().dst) {
                         self.handle_signed_message(msg, route, our_name)?;

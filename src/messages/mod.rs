@@ -34,6 +34,7 @@ use routing_table::{Prefix, VersionedPrefix};
 use routing_table::Authority;
 use rust_sodium::crypto::{box_, sign};
 use sha3::Digest256;
+use signature_accumulator::Signed;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::iter;
@@ -347,22 +348,6 @@ impl SignedMessage {
         1
     }
 
-    /// Adds the given signature if it is new, without validating it. If the collection of section
-    /// lists isn't empty, the signature is only added if `pub_id` is a member of the first section
-    /// list.
-    pub fn add_signature(&mut self, pub_id: PublicId, sig: sign::Signature) {
-        if self.content.src.is_multiple() && self.is_sender(&pub_id) {
-            let _ = self.signatures.insert(pub_id, sig);
-        }
-    }
-
-    /// Adds all signatures from the given message, without validating them.
-    pub fn add_signatures(&mut self, msg: SignedMessage) {
-        if self.content.src.is_multiple() {
-            self.signatures.extend(msg.signatures);
-        }
-    }
-
     /// Returns the routing message without cloning it.
     pub fn into_routing_message(self) -> RoutingMessage {
         self.content
@@ -376,34 +361,6 @@ impl SignedMessage {
     /// The priority Crust should send this message with.
     pub fn priority(&self) -> u8 {
         self.content.priority()
-    }
-
-    /// Returns whether there are enough signatures from the sender.
-    pub fn check_fully_signed(&mut self, min_section_size: usize) -> bool {
-        if !self.has_enough_sigs(min_section_size) {
-            return false;
-        }
-
-        // Remove invalid signatures, then check again that we have enough.
-        // We also check (again) that all messages are from valid senders, because the message
-        // may have been sent from another node, and we cannot trust that that node correctly
-        // controlled which signatures were added.
-        // TODO (MAID-1677): we also need to check that the src_sections list corresponds to the
-        // section(s) at some point in recent history; i.e. that it was valid; but we shouldn't
-        // force it to match our own because our routing table may have changed since.
-
-        let signed_bytes = match serialise(&self.content) {
-            Ok(serialised) => serialised,
-            Err(error) => {
-                warn!("Failed to serialise {:?}: {:?}", self, error);
-                return false;
-            }
-        };
-        for invalid_signature in &self.find_invalid_sigs(signed_bytes) {
-            let _ = self.signatures.remove(invalid_signature);
-        }
-
-        self.has_enough_sigs(min_section_size)
     }
 
     // Returns true iff `pub_id` is in self.section_lists
@@ -444,9 +401,60 @@ impl SignedMessage {
                 let valid_signatories = (&signatories) & (&self.signing_section);
 
                 valid_signatories.len() * QUORUM_DENOMINATOR >
-                self.signing_section.len() * QUORUM_NUMERATOR
+                    self.signing_section.len() * QUORUM_NUMERATOR
             }
             ManagedNode(_) | Client { .. } => self.signatures.len() == 1,
+        }
+    }
+}
+
+impl Signed for SignedMessage {
+    fn digest(&self) -> Option<Digest256> {
+        match serialise(self.routing_message()) {
+            Ok(serialised_msg) => Some(sha3_256(&serialised_msg)),
+            Err(err) => {
+                error!("Failed to serialise {:?}: {:?}.", self, err);
+                None
+            }
+        }
+    }
+
+    fn check_fully_signed(&mut self, min_section_size: usize) -> bool {
+        if !self.has_enough_sigs(min_section_size) {
+            return false;
+        }
+
+        // Remove invalid signatures, then check again that we have enough.
+        // We also check (again) that all messages are from valid senders, because the message
+        // may have been sent from another node, and we cannot trust that that node correctly
+        // controlled which signatures were added.
+        // TODO (MAID-1677): we also need to check that the src_sections list corresponds to the
+        // section(s) at some point in recent history; i.e. that it was valid; but we shouldn't
+        // force it to match our own because our routing table may have changed since.
+
+        let signed_bytes = match serialise(&self.content) {
+            Ok(serialised) => serialised,
+            Err(error) => {
+                warn!("Failed to serialise {:?}: {:?}", self, error);
+                return false;
+            }
+        };
+        for invalid_signature in &self.find_invalid_sigs(signed_bytes) {
+            let _ = self.signatures.remove(invalid_signature);
+        }
+
+        self.has_enough_sigs(min_section_size)
+    }
+
+    fn add_signature(&mut self, pub_id: PublicId, sig: sign::Signature) {
+        if self.content.src.is_multiple() && self.is_sender(&pub_id) {
+            let _ = self.signatures.insert(pub_id, sig);
+        }
+    }
+
+    fn add_signatures(&mut self, msg: SignedMessage) {
+        if self.content.src.is_multiple() {
+            self.signatures.extend(msg.signatures);
         }
     }
 }
@@ -744,9 +752,7 @@ impl Debug for DirectMessage {
             ProxyRateLimitExceeded { ref ack } => {
                 write!(formatter, "ProxyRateLimitExceeded({:?})", ack)
             }
-            _ => {
-                write!(formatter, "TODO")
-            }
+            _ => write!(formatter, "TODO"),
         }
     }
 }
