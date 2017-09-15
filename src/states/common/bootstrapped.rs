@@ -44,6 +44,15 @@ pub trait Bootstrapped: Base {
         expires_at: Option<Instant>,
     ) -> Result<(), RoutingError>;
 
+    fn send_routing_message_via_route_new(
+        &mut self,
+        routing_msg: RoutingMessage,
+        route: u8,
+        expires_at: Option<Instant>,
+    ) -> Result<(), RoutingError> {
+        self.send_routing_message_via_route(routing_msg, route, expires_at)
+    }
+
     fn routing_msg_filter(&mut self) -> &mut RoutingMessageFilter;
     fn timer(&mut self) -> &mut Timer;
 

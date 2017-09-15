@@ -30,11 +30,11 @@ use itertools::Itertools;
 use lru_time_cache::LruCache;
 use maidsafe_utilities::serialisation::{deserialise, serialise};
 use peer_manager::SectionMap;
-use routing_table::{Prefix, VersionedPrefix, Xorable};
+use routing_table::{Prefix, VersionedPrefix};
 use routing_table::Authority;
 use rust_sodium::crypto::{box_, sign};
 use sha3::Digest256;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::iter;
 use std::time::Duration;
@@ -105,9 +105,37 @@ impl Message {
 // FIXME - See https://maidsafe.atlassian.net/browse/MAID-2026 for info on removing this exclusion.
 #[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
 pub enum DirectMessage {
-    /// Sent from members of a section or group message's source authority to the first hop. The
+    /// Sent from members of a section or group message's source authority to the delegate. The
     /// message will only be relayed once enough signatures have been accumulated.
     MessageSignature(Digest256, sign::Signature),
+    /// Sent by the delegated node to its section as a confirmation
+    /// that the message has gathered a quorum of signatures.
+    ConfirmAccumulation {
+        message_hash: Digest256,
+        signatures: BTreeMap<PublicId, sign::Signature>,
+    },
+    /// Sent by the delegated node to the next hop section.
+    RelayMessage(SignedMessage),
+    /// Sent by a node to everyone else in its section upon
+    /// receiving a `RelayMessage`.
+    SwarmRelayMessage(SignedMessage),
+    /// Sent from a node in a section one-hop-over to a delegate,
+    /// as proof that we received the message from the delegate.
+    HopAckSig {
+        /// Hash of the RoutingMessage received.
+        message_hash: Digest256,
+        /// PublicId of the delegate that we received the message from
+        /// FIXME(msg): is it needed? - Bart
+        delegate_id: PublicId,
+        /// Our signature of (message_hash, delegate_id).
+        signature: sign::Signature,
+    },
+    /// Broadcast by the delegate to its own section once it has received a quorum of `HopAckSig`s
+    /// from "the other side".
+    HopAck {
+        message_hash: Digest256,
+        signatures: BTreeMap<PublicId, sign::Signature>,
+    },
     /// A signature for the current `BTreeSet` of section's node names
     SectionListSignature(SectionList, sign::Signature),
     /// Sent from a newly connected client to the bootstrap node to prove that it is the owner of
@@ -187,6 +215,7 @@ impl DirectMessage {
 /// To relay a `SignedMessage` via another node, the `SignedMessage` is wrapped in a `HopMessage`.
 /// The `signature` is from the node that sends this directly to a node in its routing table. To
 /// prevent Man-in-the-middle attacks, the `content` is signed by the original sender.
+// TODO(msg): delete this.
 #[derive(Serialize, Deserialize)]
 pub struct HopMessage {
     /// Wrapped signed message.
@@ -250,16 +279,15 @@ impl SectionList {
     }
 }
 
-/// Wrapper around a routing message, signed by the originator of the message.
+/// New simplified signed message definition.
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Hash, Serialize, Deserialize)]
 pub struct SignedMessage {
-    /// A request or response type message.
+    /// The `RoutingMessage` being sent.
     content: RoutingMessage,
-    /// Nodes sending the message (those expected to sign it)
-    src_sections: Vec<SectionList>,
-    /// The lists of the sections involved in routing this message, in chronological order.
-    // TODO: implement (MAID-1677): sec_lists: Vec<SectionList>,
-    /// The IDs and signatures of the source authority's members.
+    /// Public IDs of all the nodes in the section relaying this message.
+    // TODO: eventually include a data chain block ID here instead.
+    signing_section: BTreeSet<PublicId>,
+    /// Signatures from the section which sent us this message.
     signatures: BTreeMap<PublicId, sign::Signature>,
 }
 
@@ -267,16 +295,30 @@ impl SignedMessage {
     /// Creates a `SignedMessage` with the given `content` and signed by the given `full_id`.
     ///
     /// Requires the list `src_sections` of nodes who should sign this message.
+    // TODO(msg): delete this constructor.
     pub fn new(
         content: RoutingMessage,
         full_id: &FullId,
-        mut src_sections: Vec<SectionList>,
+        src_sections: Vec<SectionList>,
     ) -> Result<SignedMessage, RoutingError> {
-        src_sections.sort_by_key(|list| list.prefix);
         let sig = sign::sign_detached(&serialise(&content)?, full_id.signing_private_key());
         Ok(SignedMessage {
             content: content,
-            src_sections: src_sections,
+            signing_section: src_sections[0].pub_ids.clone(),
+            signatures: iter::once((*full_id.public_id(), sig)).collect(),
+        })
+    }
+
+    /// <new version of above>
+    pub fn new_new(
+        content: RoutingMessage,
+        full_id: &FullId,
+        signing_section: BTreeSet<PublicId>,
+    ) -> Result<SignedMessage, RoutingError> {
+        let sig = sign::sign_detached(&serialise(&content)?, full_id.signing_private_key());
+        Ok(SignedMessage {
+            content,
+            signing_section,
             signatures: iter::once((*full_id.public_id(), sig)).collect(),
         })
     }
@@ -300,8 +342,9 @@ impl SignedMessage {
     }
 
     /// Returns the number of nodes in the source authority.
+    // TODO(msg): delete this
     pub fn src_size(&self) -> usize {
-        self.src_sections.iter().map(|sl| sl.pub_ids.len()).sum()
+        1
     }
 
     /// Adds the given signature if it is new, without validating it. If the collection of section
@@ -365,9 +408,7 @@ impl SignedMessage {
 
     // Returns true iff `pub_id` is in self.section_lists
     fn is_sender(&self, pub_id: &PublicId) -> bool {
-        self.src_sections.iter().any(
-            |list| list.pub_ids.contains(pub_id),
-        )
+        self.signing_section.contains(pub_id)
     }
 
     // Returns a list of all invalid signatures (not from an expected key or not cryptographically
@@ -395,45 +436,15 @@ impl SignedMessage {
 
     // Returns true if there are enough signatures (note that this method does not verify the
     // signatures, it only counts them; it also does not verify `self.src_sections`).
-    fn has_enough_sigs(&self, min_section_size: usize) -> bool {
+    fn has_enough_sigs(&self, _min_section_size: usize) -> bool {
         use Authority::*;
         match self.content.src {
-            ClientManager(_) | NaeManager(_) | NodeManager(_) => {
-                // Note: there should be exactly one source section, but we use safe code:
-                let valid_names: HashSet<_> = self.src_sections
-                    .iter()
-                    .flat_map(|list| list.pub_ids.iter().map(PublicId::name))
-                    .sorted_by(|lhs, rhs| self.content.src.name().cmp_distance(lhs, rhs))
-                    .into_iter()
-                    .take(min_section_size)
-                    .collect();
-                let valid_sigs = self.signatures
-                    .keys()
-                    .filter(|pub_id| valid_names.contains(pub_id.name()))
-                    .count();
-                // TODO: we should consider replacing valid_names.len() with
-                // cmp::min(routing_table.len(), min_section_size)
-                // (or just min_section_size, but in that case we will not be able to handle user
-                // messages during boot-up).
-                valid_sigs * QUORUM_DENOMINATOR > valid_names.len() * QUORUM_NUMERATOR
-            }
-            Section(_) => {
-                // Note: there should be exactly one source section, but we use safe code:
-                let num_sending = self.src_sections.iter().fold(0, |count, list| {
-                    count + list.pub_ids.len()
-                });
-                let valid_sigs = self.signatures.len();
-                valid_sigs * QUORUM_DENOMINATOR > num_sending * QUORUM_NUMERATOR
-            }
-            PrefixSection(_) => {
-                // Each section must have enough signatures:
-                self.src_sections.iter().all(|list| {
-                    let valid_sigs = self.signatures
-                        .keys()
-                        .filter(|pub_id| list.pub_ids.contains(pub_id))
-                        .count();
-                    valid_sigs * QUORUM_DENOMINATOR > list.pub_ids.len() * QUORUM_NUMERATOR
-                })
+            ClientManager(_) | NaeManager(_) | NodeManager(_) | Section(_) | PrefixSection(_) => {
+                let signatories: BTreeSet<_> = self.signatures.keys().cloned().collect();
+                let valid_signatories = (&signatories) & (&self.signing_section);
+
+                valid_signatories.len() * QUORUM_DENOMINATOR >
+                self.signing_section.len() * QUORUM_NUMERATOR
             }
             ManagedNode(_) | Client { .. } => self.signatures.len() == 1,
         }
@@ -616,6 +627,7 @@ pub enum MessageContent {
     OtherSectionMerge(BTreeSet<PublicId>, u64),
     /// Acknowledge receipt of any message except an `Ack`. It contains the hash of the
     /// received message and the priority.
+    // TODO(msg): delete this?
     Ack(Ack, u8),
     /// Part of a user-facing message
     UserMessagePart {
@@ -732,6 +744,9 @@ impl Debug for DirectMessage {
             ProxyRateLimitExceeded { ref ack } => {
                 write!(formatter, "ProxyRateLimitExceeded({:?})", ack)
             }
+            _ => {
+                write!(formatter, "TODO")
+            }
         }
     }
 }
@@ -753,7 +768,7 @@ impl Debug for SignedMessage {
             formatter,
             "SignedMessage {{ content: {:?}, sending nodes: {:?}, signatures: {:?} }}",
             self.content,
-            self.src_sections,
+            self.signing_section,
             self.signatures.keys().collect_vec()
         )
     }

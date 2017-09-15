@@ -695,6 +695,7 @@ impl Node {
 
         match direct_message {
             MessageSignature(digest, sig) => self.handle_message_signature(digest, sig, pub_id)?,
+            RelayMessage(signed_msg) => self.handle_relayed_message(signed_msg, pub_id)?,
             SectionListSignature(section_list, sig) => {
                 self.handle_section_list_signature(
                     pub_id,
@@ -780,6 +781,10 @@ impl Node {
             msg @ BootstrapResponse(_) |
             msg @ ProxyRateLimitExceeded { .. } => {
                 debug!("{:?} Unhandled direct message: {:?}", self, msg);
+            }
+            // TODO(msg): new message!
+            _ => {
+                debug!("one of them newfangled messages!");
             }
         }
         Ok(())
@@ -3859,6 +3864,65 @@ impl Node {
         let _ = self.dropped_clients.insert(*pub_id, ());
         self.disconnect_peer(pub_id, None);
     }
+
+    // If we are the delegate, broadcast the given signed message to every node in the next hop.
+    fn relay_signed_message(&mut self, signed_message: SignedMessage) -> Result<(), RoutingError> {
+        signed_message.check_integrity(self.min_section_size())?;
+
+        let dest_name = signed_message.routing_message().dst.name();
+        // FIXME(msg): consider using a new version of `RoutingTable::targets` here.
+        let closest_section = {
+            let (_, node_names) = self.routing_table().closest_section(&dest_name);
+            self.peer_mgr.get_pub_ids(node_names)
+        };
+
+        for node in closest_section {
+            if node == *self.full_id.public_id() {
+                continue;
+            }
+            self.send_direct_message(
+                node,
+                DirectMessage::RelayMessage(signed_message.clone())
+            );
+        }
+
+        // TODO: also broadcast signatures to our own section
+
+        Ok(())
+    }
+
+    fn send_per_hop_ack(&mut self, message: &SignedMessage, sent_by: PublicId) -> Result<(), RoutingError> {
+        let message_hash = Ack::compute(message.routing_message())?.get_hash();
+        let ack_data = serialisation::serialise(&(message_hash, sent_by))?;
+        let signature = sign::sign_detached(&ack_data, self.full_id.signing_private_key());
+
+        self.send_direct_message(
+            sent_by,
+            DirectMessage::HopAckSig {
+                message_hash,
+                delegate_id: sent_by,
+                signature,
+            }
+        );
+
+        Ok(())
+    }
+
+    fn handle_relayed_message(&mut self, message: SignedMessage, sent_by: PublicId) -> Result<(), RoutingError> {
+        message.check_integrity(self.min_section_size())?;
+
+        // Send an ACK back to the delegate from the previous hop.
+        self.send_per_hop_ack(&message, sent_by)?;
+
+        // TODO(msg): swarm to our section
+        Ok(())
+    }
+
+    #[allow(unused)]
+    fn handle_hop_ack_sig(&self) {}
+
+    #[allow(unused)]
+    fn handle_hop_ack(&self) {}
 }
 
 impl Base for Node {
@@ -3979,6 +4043,70 @@ impl Bootstrapped for Node {
 
     fn ack_mgr_mut(&mut self) -> &mut AckManager {
         &mut self.ack_mgr
+    }
+
+    fn send_routing_message_via_route_new(
+        &mut self,
+        routing_msg: RoutingMessage,
+        route: u8,
+        expires_at: Option<Instant>,
+    ) -> Result<(), RoutingError> {
+        if !self.in_authority(&routing_msg.src) {
+            trace!(
+                "{:?} Not part of the source authority. Not sending message {:?}.",
+                self,
+                routing_msg
+            );
+            return Ok(());
+        }
+
+        if !self.add_to_pending_acks(&routing_msg, route, expires_at) {
+            debug!(
+                "{:?} already received an ack for {:?} - so not resending it.",
+                self,
+                routing_msg
+            );
+            return Ok(());
+        }
+
+        let our_section_pub_ids = {
+            let our_section = self.routing_table().get_section(self.name()).ok_or(
+                RoutingError::RoutingTable(RoutingTableError::NoSuchPeer),
+            )?;
+            self.peer_mgr.get_pub_ids(our_section)
+        };
+
+        let signed_msg = SignedMessage::new_new(routing_msg, &self.full_id, our_section_pub_ids)?;
+
+        match self.get_signature_target(&signed_msg.routing_message().src, route) {
+            None => Ok(()),
+            Some(delegate_node) if delegate_node == *self.name() => {
+                let min_section_size = self.min_section_size();
+                if let Some((msg, _)) =
+                    self.sig_accumulator.add_message(
+                        signed_msg,
+                        min_section_size,
+                        route,
+                    )
+                {
+                    // TODO: maybe handle this message as well if we are the recipient?
+                    self.relay_signed_message(msg)?;
+                }
+                Ok(())
+            }
+            Some(delegate_node) => {
+                if let Some(&pub_id) = self.peer_mgr.get_pub_id(&delegate_node) {
+                    let direct_msg = signed_msg.routing_message().to_signature(
+                        self.full_id
+                            .signing_private_key(),
+                    )?;
+                    self.send_direct_message(pub_id, direct_msg);
+                    Ok(())
+                } else {
+                    Err(RoutingError::RoutingTable(RoutingTableError::NoSuchPeer))
+                }
+            }
+        }
     }
 
     // Constructs a signed message, finds the node responsible for accumulation, and either sends

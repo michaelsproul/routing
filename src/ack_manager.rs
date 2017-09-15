@@ -121,6 +121,16 @@ impl Ack {
         let hash_msg = serialisation::serialise(routing_msg)?;
         Ok(Ack { m_hash: sha3_256(&hash_msg) })
     }
+
+    /// Construct an `Ack` from a message hash.
+    pub fn from_hash(m_hash: sha3::Digest256) -> Self {
+        Ack { m_hash }
+    }
+
+    /// Gets the inner hash of an `Ack`.
+    pub fn get_hash(&self) -> sha3::Digest256 {
+        self.m_hash
+    }
 }
 
 impl fmt::Debug for Ack {

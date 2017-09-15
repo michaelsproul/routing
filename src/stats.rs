@@ -271,7 +271,9 @@ impl Stats {
             TunnelSuccess(_) |
             TunnelSelect(_) |
             TunnelClosed(_) |
-            TunnelDisconnect(_) => self.msg_other += 1,
+            TunnelDisconnect(_) |
+            // FIXME(msg): add types here?
+            _ => self.msg_other += 1,
         }
         self.increment_msg_total();
     }
