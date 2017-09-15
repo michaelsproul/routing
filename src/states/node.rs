@@ -28,6 +28,7 @@ use error::{BootstrapResponseError, InterfaceError, RoutingError};
 use event::Event;
 #[cfg(feature = "use-mock-crust")]
 use fake_clock::FakeClock as Instant;
+use hop_ack::HopAck;
 use id::{FullId, PublicId};
 use itertools::Itertools;
 use log::LogLevel;
@@ -102,6 +103,7 @@ pub struct Node {
     response_cache: Box<Cache>,
     routing_msg_filter: RoutingMessageFilter,
     sig_accumulator: SignatureAccumulator<SignedMessage>,
+    hop_ack_accumulator: SignatureAccumulator<HopAck>,
     section_list_sigs: SectionListCache,
     stats: Stats,
     tick_timer_token: u64,
@@ -252,6 +254,7 @@ impl Node {
             response_cache: cache,
             routing_msg_filter: RoutingMessageFilter::new(),
             sig_accumulator: SignatureAccumulator::new(),
+            hop_ack_accumulator: SignatureAccumulator::new(),
             section_list_sigs: SectionListCache::new(),
             stats: stats,
             tick_timer_token: tick_timer_token,
@@ -3875,6 +3878,14 @@ impl Node {
             self.peer_mgr.get_pub_ids(node_names)
         };
 
+        // Add a `HopAck` to our ACK accumulator so that we can accumulate a signed ACK
+        // from the recipient to relay back to our own section.
+        let our_public_id = *self.full_id.public_id();
+        let min_section_size = self.min_section_size();
+        let hop_ack = HopAck::new(&signed_message, our_public_id, closest_section.clone())?;
+
+        let _ = self.hop_ack_accumulator.add_message(hop_ack, min_section_size);
+
         for node in closest_section {
             if node == *self.full_id.public_id() {
                 continue;
@@ -3917,6 +3928,8 @@ impl Node {
 
         // Send an ACK back to the delegate from the previous hop.
         self.send_per_hop_ack(&message, sent_by)?;
+
+        // TODO(msg): handle the message, OR, send it onwards.
 
         // TODO(msg): swarm to our section
         Ok(())

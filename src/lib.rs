@@ -166,6 +166,7 @@ mod data;
 mod error;
 mod event;
 mod event_stream;
+mod hop_ack;
 mod section_list_cache;
 mod id;
 mod message_filter;
