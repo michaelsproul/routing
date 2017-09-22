@@ -51,18 +51,9 @@ impl SectionListCache {
         if let Some(pub_id) = pub_id_opt {
             if let Some(lists) = self.signed_by.remove(&pub_id) {
                 for (prefix, list) in lists {
-<<<<<<< HEAD
                     self.signatures.get_mut(&prefix).and_then(|map| {
                         map.get_mut(&list).and_then(|sigmap| sigmap.remove(&pub_id))
                     });
-=======
-                    self.signatures
-                        .get_mut(&prefix)
-                        .and_then(|map| {
-                                      map.get_mut(&list)
-                                          .and_then(|sigmap| sigmap.remove(&pub_id))
-                                  });
->>>>>>> 46c2c3e... Turn off `unused_results` lint.
                 }
                 self.prune();
                 self.update_lists_cache(our_section_size);
@@ -161,15 +152,10 @@ impl SectionListCache {
                 if sig_count * QUORUM_DENOMINATOR > our_section_size * QUORUM_NUMERATOR {
                     // we have a list with a quorum of signatures
                     let signatures = unwrap!(map.get(list));
-<<<<<<< HEAD
                     self.lists_cache.insert(
                         *prefix,
                         (list.clone(), signatures.clone()),
                     );
-=======
-                    self.lists_cache
-                        .insert(*prefix, (list.clone(), signatures.clone()));
->>>>>>> 46c2c3e... Turn off `unused_results` lint.
                 }
             }
         }
